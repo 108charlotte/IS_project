@@ -2,10 +2,6 @@ import pandas as pd
 import re
 import numpy as np
 
-df = pd.read_csv('data_pdf_faces_2017-03-19_16-36(2).csv')
-# remove the first row (an extra info row)
-df = df.drop(0)
-
 # https://www.geeksforgeeks.org/python/python-extract-numbers-from-string/
 def cols_btw(start, end): # "columns between"
     '''
@@ -35,8 +31,8 @@ def cols_btw(start, end): # "columns between"
     formatted_start_n = str(start_n).zfill(2)
     start_chars = find_chars(start, formatted_start_n)
 
-    print(f"{start_n=}")
-    print(f"{start_chars=}")
+    # print(f"{start_n=}")
+    # print(f"{start_chars=}")
 
     end_nums = re.findall(r'-?\d+', end)
     end_n = [int(x) for x in end_nums][-1]
@@ -51,26 +47,9 @@ def cols_btw(start, end): # "columns between"
 
     return to_return
 
-# retrieving player decision columns
-decision_cols = cols_btw('G101', 'G130')
-decisions = df[decision_cols]
-print("decisions")
-print(decisions)
-
-# retrieving player score columns to examine relationship btw decisions and scores
-player_score_cols = cols_btw("VI03_01", "VI03_30")
-player_scores = df[player_score_cols]
-print("player scores")
-print(player_scores)
-
-# retrieving computer score columns
-computer_score_cols = cols_btw('VI05_01', 'VI05_30')
-computer_scores = df[computer_score_cols]
-print("computer scores")
-print(computer_scores)
 
 '''
-Used ChatGPT to analyze player's score and computer's score columns to determine meaning of score numbers so that they can be converted to decision numbers, because computer decision numbers aren't provided. 
+I used ChatGPT to analyze player's score and computer's score columns to determine meaning of score numbers so that they can be converted to decision numbers, because computer decision numbers aren't provided. 
 Conclusion: 
 player decision player score    computer score  computer decision
 1               3               3               1
@@ -117,31 +96,57 @@ def c_score_2_decision(score, player_decision, player_score):
     # print(f"Computer decision: {c_d}")
     return c_d
 
-# retrieving narcissistic indices
-ni_cols = cols_btw('NI01', 'NI16')
-nis = df[ni_cols]
-print("nis")
-print(nis)
+def main(): 
+    df = pd.read_csv('data_pdf_faces_2017-03-19_16-36(2).csv')
+    # remove the first row (an extra info row)
+    df = df.drop(0)
 
-# retrieving PP01 values
-ppo1_cols = cols_btw('PP01_01', 'PP01_40')
-ppo1 = df[ppo1_cols]
-print("ppo1")
-print(ppo1)
+    # retrieving player decision columns
+    decision_cols = cols_btw('G101', 'G130')
+    decisions = df[decision_cols]
+    print("decisions")
+    print(decisions)
 
-df2 = df.copy()
-computer_decisions = np.zeros((len(computer_scores), len(computer_scores.iloc[0, :])))
-for i in range(len(computer_scores)): 
-    for j in range(len(computer_scores.iloc[i, :])): 
-        computer_score = computer_scores.iloc[i, j]
-        player_score = player_scores.iloc[i, j]
-        player_decision = decisions.iloc[i, j]
-        computer_decisions[i][j] = c_score_2_decision(computer_score, player_decision, player_score)
-print(len(computer_decisions[0]))
-print(len(computer_decisions))
-for col_n in range(len(computer_decisions[0])): 
-    df2[f'CD_{str(col_n+1).zfill(2)}'] = computer_decisions[:, col_n]
+    # retrieving player score columns to examine relationship btw decisions and scores
+    player_score_cols = cols_btw("VI03_01", "VI03_30")
+    player_scores = df[player_score_cols]
+    print("player scores")
+    print(player_scores)
 
-print(df2)
+    # retrieving computer score columns
+    computer_score_cols = cols_btw('VI05_01', 'VI05_30')
+    computer_scores = df[computer_score_cols]
+    print("computer scores")
+    print(computer_scores)
 
-df2.to_csv('data_with_computer_decisions.csv', index=False)
+    # retrieving narcissistic indices
+    ni_cols = cols_btw('NI01', 'NI16')
+    nis = df[ni_cols]
+    print("nis")
+    print(nis)
+
+    # retrieving PP01 values
+    ppo1_cols = cols_btw('PP01_01', 'PP01_40')
+    ppo1 = df[ppo1_cols]
+    print("ppo1")
+    print(ppo1)
+
+    df2 = df.copy()
+    computer_decisions = np.zeros((len(computer_scores), len(computer_scores.iloc[0, :])))
+    for i in range(len(computer_scores)): 
+        for j in range(len(computer_scores.iloc[i, :])): 
+            computer_score = computer_scores.iloc[i, j]
+            player_score = player_scores.iloc[i, j]
+            player_decision = decisions.iloc[i, j]
+            computer_decisions[i][j] = c_score_2_decision(computer_score, player_decision, player_score)
+    print(len(computer_decisions[0]))
+    print(len(computer_decisions))
+    for col_n in range(len(computer_decisions[0])): 
+        df2[f'CD_{str(col_n+1).zfill(2)}'] = computer_decisions[:, col_n]
+
+    print(df2)
+
+    df2.to_csv('data_with_computer_decisions.csv', index=False)
+
+if __name__ == "__main__": 
+    main()

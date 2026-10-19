@@ -12,7 +12,7 @@ def train_nn(nn, training_data, n_epoch=10, n_batch_size=64, report_every=50, le
     optimizer = torch.optim.Adam(nn.parameters(), lr=learning_rate)
 
 
-def train_rnn(rnn, computer_decisions, player_decisions, n_epoch=10, n_batch_size=64, report_every=50, learning_rate=0.1, criterion=nn.NLLLoss()): 
+def train_rnn(rnn, computer_decisions, player_decisions, n_epoch=10, n_batch_size=64, report_every=50, learning_rate=0.1, criterion=nn.CrossEntropyLoss()): 
     current_loss = 0
     all_losses = []
     rnn.train()

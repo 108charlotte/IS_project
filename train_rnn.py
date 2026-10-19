@@ -9,14 +9,14 @@ df = pd.read_csv("data_with_computer_decisions.csv")
 # retrieving player decision columns
 player_decision_cols = cols_btw('G101', 'G130')
 player_decisions = df[player_decision_cols]
-print("player decisions")
-print(player_decisions)
+# print("player decisions")
+# print(player_decisions)
 
 # retrieving computer decision columns
 computer_decision_cols = cols_btw("CD_01", "CD_30")
 computer_decisions = df[computer_decision_cols]
-print("computer decisions")
-print(computer_decisions)
+# print("computer decisions")
+# print(computer_decisions)
 
 
 # computer decision as input, player decision as output --> repeat
