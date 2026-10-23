@@ -33,5 +33,17 @@ computer_decision_tensors = []
 for i in range(len(computer_decisions)): 
     computer_decision_tensors.append(torch.tensor(computer_decisions.iloc[i].values))
 
+# TODO: randomize this
+train_player_decisions = player_decision_tensors[:164]
+train_computer_decisions = computer_decision_tensors[:164]
+
+val_player_decisions = player_decision_tensors[164:185]
+val_computer_decisions = computer_decision_tensors[164:185]
+
+test_player_decisions = player_decision_tensors[185:206]
+test_computer_decisions = computer_decision_tensors[185:206]
+
 rnn = PredictiveCodingRNN(2, 8, 2)
-train_rnn(rnn, computer_decision_tensors, player_decision_tensors) # passing in lists of 1D tensors
+train_rnn(rnn, train_computer_decisions, train_player_decisions, val_computer_decisions, val_player_decisions) # passing in lists of 1D tensors
+
+# model validation

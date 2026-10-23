@@ -4,7 +4,7 @@ import torch
 from torch import nn
 
 class NeuralNet(nn.Module): 
-    def __init__(self, inp=2, l_1=8, out=1): # input size = # of features per token; should be 2
+    def __init__(self, inp=1, l_1=8, out=2): # outputs between 0 and 1 where 0 means more likely to choose decision 1 and 1 means more likely to choose decision 2
         super(NeuralNet, self).__init__()
         self.layer_1 = nn.Sequential(
             nn.Linear(inp, l_1), 
@@ -12,7 +12,7 @@ class NeuralNet(nn.Module):
         )
         self.layer_2 = nn.Sequential(
             nn.Linear(l_1, out), 
-            nn.Tanh(out)
+            nn.Sigmoid()
         )
     
     def forward(self, x):

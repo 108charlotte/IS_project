@@ -49,7 +49,7 @@ def cols_btw(start, end): # "columns between"
 
 
 '''
-I used ChatGPT to analyze player's score and computer's score columns to determine meaning of score numbers so that they can be converted to decision numbers, because computer decision numbers aren't provided. 
+I used ChatGPT to analyze the player's score and computer's score columns to determine meaning of score numbers so that they can be converted to decision numbers, because computer decision numbers aren't provided. 
 Conclusion: 
 player decision player score    computer score  computer decision
 1               3               3               1
