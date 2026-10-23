@@ -7,8 +7,8 @@ import time
 from scipy.stats import linregress # https://stackoverflow.com/questions/9538525/calculating-slopes-in-numpy-or-scipy
 
 # TODO: fix batching bc I think its wrong
-
-def train_nn(nn, input_data=[], targets=[], test_data=[], test_targets=[], n_epoch=20, n_batch_size=10, report_every=5, learning_rate=0.2, criterion=nn.MSELoss()): 
+# TODO: fix test losses unexpectedly higher than train losses, even for the 1st value
+def train_nn(nn, input_data=[], targets=[], test_data=[], test_targets=[], n_epoch=30, n_batch_size=10, report_every=5, learning_rate=0.2, criterion=nn.MSELoss()): 
     current_loss = 0
     all_losses = []
     all_test_losses = []
@@ -55,21 +55,21 @@ def train_nn(nn, input_data=[], targets=[], test_data=[], test_targets=[], n_epo
                     # print(f"batch: {batch}")
                     input_tensor = test_data[item].to(torch.float32)
                     output = nn.forward(input_tensor)
-                    pred = output[output.argmax(dim=0).item()] # TODO: fix argmax here
-                    loss = criterion(pred, test_targets[item])
+                    pred = output[output.argmax(dim=0).item()] # TODO: fix argmax here, it should be able to get me all of this automatically
+                    loss = criterion(pred, test_targets[item].long()-1)
                     test_batch_losses.append(loss)
                 
                 # print("batch test loss: ")
                 # print(np.mean(test_batch_losses))
 
                 epoch_test_loss = float(np.mean(test_batch_losses))
-                all_test_losses.append(epoch_test_loss) # TODO: FIX ACCURACIES IDENTICAL, maybe model isn't being saved? 
+                all_test_losses.append(epoch_test_loss) 
                 
-            print(f"{k} ({k / n_epoch:.0%}): \t average batch loss = {all_losses[-1]}")
+            print(f"{k} ({k / n_epoch:.0%}): \t average batch loss = {all_losses[-1]} \t average batch test loss = {all_test_losses[-1]}")
 
         current_loss = 0
 
-    print(f"done training, all losses: {all_losses}, \t all test losses: {all_test_losses} \t avg improvement in losses: {linregress(list(range(len(all_losses))), all_losses).slope} \t avg improvement in test losses: {linregress(list(range(len(all_test_losses))), all_test_losses).slope}")
+    print(f"done training,\t avg improvement in losses: {linregress(list(range(len(all_losses))), all_losses).slope} \t avg improvement in test losses: {linregress(list(range(len(all_test_losses))), all_test_losses).slope}")
 
 
 def create_input_tensor(computer_decisions, player_decisions, player, decision): 
