@@ -3,12 +3,9 @@ import torch
 from torch import nn
 import random
 import numpy as np
-import time
 from scipy.stats import linregress # https://stackoverflow.com/questions/9538525/calculating-slopes-in-numpy-or-scipy
 
-# TODO: fix batching bc I think its wrong
-# TODO: fix test losses unexpectedly higher than train losses, even for the 1st value
-def train_nn(nn, input_data=[], targets=[], test_data=[], test_targets=[], n_epoch=30, n_batch_size=10, report_every=5, learning_rate=0.2, criterion=nn.MSELoss()): 
+def train_nn(nn, input_data=[], targets=[], test_data=[], test_targets=[], n_epoch=40, n_batch_size=10, report_every=5, learning_rate=0.001, criterion=nn.MSELoss()): 
     current_loss = 0
     all_losses = []
     all_test_losses = []
@@ -20,12 +17,11 @@ def train_nn(nn, input_data=[], targets=[], test_data=[], test_targets=[], n_epo
     for k in range(1, n_epoch + 1): 
         nn.train()
         nn.zero_grad()
-        batches = []
         batches = list(range(len(input_data)))
         random.shuffle(batches)
-        batches = np.array_split(batches, len(batches) // n_batch_size)
+        n_batches = int(np.ceil(len(batches) / n_batch_size)) # rounding up to the total # of batches, since if there's any extra few data points those should go in their own batch
+        batches = np.array_split(batches, n_batches)
         # print(f"batches: {batches}")
-
 
         for idx, batch in enumerate(batches): 
             # print(f"batch: {batch}")
@@ -33,10 +29,15 @@ def train_nn(nn, input_data=[], targets=[], test_data=[], test_targets=[], n_epo
             for item in batch: 
                 # print(f"{input_data[batch]=}")
                 input_tensor = input_data[item].to(torch.float32)
-                output = nn.forward(input_tensor)
-                pred = output[output.argmax(dim=0).item()] # TODO: fix argmax here
+                # squeezing both to make them scalar-shaped tensors
+                output = nn(input_tensor).squeeze()
+                # print(f"{output=}")
+                # print(f"{output.shape=}")
                 # print(f"{output=}, {pred=}, {targets[item]=}")
-                loss = criterion(pred, targets[item].long()-1)
+                target = (targets[item].float()-1).squeeze()
+                # print(f"{target=}")
+                # print(f"{target.shape=}")
+                loss = criterion(output, target)
                 batch_loss += loss
                 
             batch_loss.backward()
@@ -54,9 +55,9 @@ def train_nn(nn, input_data=[], targets=[], test_data=[], test_targets=[], n_epo
                 for item in range(len(test_data)): 
                     # print(f"batch: {batch}")
                     input_tensor = test_data[item].to(torch.float32)
-                    output = nn.forward(input_tensor)
-                    pred = output[output.argmax(dim=0).item()] # TODO: fix argmax here, it should be able to get me all of this automatically
-                    loss = criterion(pred, test_targets[item].long()-1)
+                    output = nn(input_tensor).squeeze()
+                    target = (test_targets[item].float()-1).squeeze()
+                    loss = criterion(output, target)
                     test_batch_losses.append(loss)
                 
                 # print("batch test loss: ")
@@ -65,11 +66,17 @@ def train_nn(nn, input_data=[], targets=[], test_data=[], test_targets=[], n_epo
                 epoch_test_loss = float(np.mean(test_batch_losses))
                 all_test_losses.append(epoch_test_loss) 
                 
-            print(f"{k} ({k / n_epoch:.0%}): \t average batch loss = {all_losses[-1]} \t average batch test loss = {all_test_losses[-1]}")
+            print(f"{k} ({k / n_epoch:.3f}): \t average batch loss = {all_losses[-1]:.5f} \t average batch test loss = {all_test_losses[-1]:.5f}")
 
         current_loss = 0
 
-    print(f"done training,\t avg improvement in losses: {linregress(list(range(len(all_losses))), all_losses).slope} \t avg improvement in test losses: {linregress(list(range(len(all_test_losses))), all_test_losses).slope}")
+    print(f"done training,\t avg improvement in losses: {linregress(list(range(len(all_losses))), all_losses).slope:.4f} \t avg improvement in test losses: {linregress(list(range(len(all_test_losses))), all_test_losses).slope:.4f}")
+    return {
+        'losses': all_losses, 
+        'test_losses': all_test_losses, 
+        'avg_loss_improvement': linregress(list(range(len(all_losses))), all_losses).slope, # could re-calculate back in train_nn file but why do it there if I've already done it here? 
+        'avg_test_loss_improvement': linregress(list(range(len(all_test_losses))), all_test_losses).slope
+    }
 
 
 def create_input_tensor(computer_decisions, player_decisions, player, decision): 
@@ -77,7 +84,7 @@ def create_input_tensor(computer_decisions, player_decisions, player, decision):
     input_tensor = input_tensor.to(torch.float32)
     return input_tensor
 
-def train_rnn(rnn, computer_decisions, player_decisions, val_computer_decisions, val_player_decisions, n_epoch=30, n_batch_size=1, report_every=5, learning_rate=0.01, criterion=nn.CrossEntropyLoss()): 
+def train_rnn(rnn, computer_decisions, player_decisions, val_computer_decisions, val_player_decisions, n_epoch=50, n_batch_size=10, report_every=5, learning_rate=0.001, criterion=nn.CrossEntropyLoss()): 
     current_loss = 0
     all_losses = []
     all_accuracies = []
@@ -91,8 +98,9 @@ def train_rnn(rnn, computer_decisions, player_decisions, val_computer_decisions,
 
         batches = list(range(len(computer_decisions)))
         random.shuffle(batches)
-        batches = np.array_split(batches, len(batches) // n_batch_size)
-        print(f"batches: {batches}")
+        n_batches = int(np.ceil(len(batches) / n_batch_size)) # rounding up to the total # of batches, since if there's any extra few data points those should go in their own batch
+        batches = np.array_split(batches, n_batches)
+        # print(f"batches: {batches}")
 
         for idx, batch in enumerate(batches): 
             batch_loss = 0
@@ -100,7 +108,8 @@ def train_rnn(rnn, computer_decisions, player_decisions, val_computer_decisions,
                 for decision in range(len(computer_decisions[player])): 
                     input_tensor = create_input_tensor(computer_decisions, player_decisions, player, decision)
                     output = rnn.forward(input_tensor)
-                    loss = criterion(output, player_decisions[player][decision].float()-1) # make correct datatype for loss calc
+                    # print(f"{output=}")
+                    loss = criterion(output, player_decisions[player][decision].long()-1) # make correct datatype for loss calc
                     batch_loss += loss
             
             batch_loss.backward()
@@ -120,19 +129,20 @@ def train_rnn(rnn, computer_decisions, player_decisions, val_computer_decisions,
                     for decision in range(len(val_computer_decisions[player])): 
                         input_tensor = create_input_tensor(val_computer_decisions, val_player_decisions, player, decision)
                         output = rnn(input_tensor)
-                        player_decision_pred = output.argmax(dim=0).item() # find the position of the largest value - the one the model predicted was the most likely
+                        # print(f"output: {output}")
+                        player_decision_pred = output.argmax(dim=0).item() # gets the index of the highest likelihood
+                        # print(f"player decision pred: {player_decision_pred}")
                         correct = (player_decision_pred == (val_player_decisions[player][decision]).long() - 1)
                         batch_acc.append(1 if correct else 0)
                 
-                print("batch acc: ")
-                print(batch_acc)
+                # print("batch acc: ")
+                # print(batch_acc)
 
                 epoch_acc = float(np.mean(batch_acc))
-                all_accuracies.append(epoch_acc) # TODO: FIX ACCURACIES IDENTICAL, maybe model isn't being saved? 
-                print(f"{k} ({k / n_epoch:.0%}): \t average batch loss = {all_losses[-1]} \t epoch accuracy = {epoch_acc}")
+                all_accuracies.append(epoch_acc) # TODO: FIX ACCURACIES IDENTICAL
+                print(f"{k} ({k / n_epoch:.3f}): \t average batch loss = {all_losses[-1]:.5f} \t epoch accuracy = {epoch_acc:.5f}")
 
         current_loss = 0
 
-    print(f"done training, all losses: {all_losses}, all accuracies: {all_accuracies}")
-
+    print(f"done training, \t avg improvement in losses: {linregress(list(range(len(all_losses))), all_losses).slope:.4f} \t avg improvement in test accuracies: {linregress(list(range(len(all_accuracies))), all_accuracies).slope:.4f}")
     return {'num_batches': len(computer_decisions), 'all_losses': all_losses}

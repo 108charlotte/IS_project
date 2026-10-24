@@ -43,6 +43,9 @@ val_computer_decisions = computer_decision_tensors[164:185]
 test_player_decisions = player_decision_tensors[185:206]
 test_computer_decisions = computer_decision_tensors[185:206]
 
+from testing_functions import get_majority_baseline
+get_majority_baseline(val_player_decisions)
+
 rnn = PredictiveCodingRNN(2, 8, 2)
 train_rnn(rnn, train_computer_decisions, train_player_decisions, val_computer_decisions, val_player_decisions) # passing in lists of 1D tensors
 

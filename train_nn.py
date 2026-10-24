@@ -5,6 +5,9 @@ from training_functions import train_nn
 from models import NeuralNet
 import numpy as np
 from sklearn.model_selection import train_test_split
+import json
+from tqdm.auto import tqdm
+from testing_functions import get_avg_baseline
 
 df = pd.read_csv("data_with_computer_decisions.csv")
 
@@ -37,24 +40,15 @@ notes:
 - significant negative corelation btw fearless dominance & cooperation
 '''
 
-def display_results(training_func_out): 
-    print("will create this function later")
+def display_results(training_func_out): # want to add optional charts later
+    output = json.dumps(training_func_out, indent=4, sort_keys=True)
+    print(output)
 
 # TODO: update rnn code to also use this function
 ni_train, ni_val_test, pp01_train, pp01_val_test, avg_decisions_train, avg_decisions_val_test = train_test_split(ni_tensors,pp01_tensors, avg_decisions, test_size=0.2, train_size=0.8)
 ni_val, ni_test, pp01_val, pp01_test, avg_decisions_val, avg_decisions_test = train_test_split(ni_val_test, pp01_val_test, avg_decisions_val_test, test_size=0.5, train_size=0.5)
 
-nn_ni = NeuralNet(16)
-# training with ni as the input, which has 16 values
-out = train_nn(nn_ni, ni_train, avg_decisions_train, ni_val, avg_decisions_val)
-display_results(out)
-
-nn_pp01 = NeuralNet(40)
-# training with pp01 as the input, which has 40 values
-train_nn(nn_pp01, pp01_train, avg_decisions_train, pp01_val, avg_decisions_val)
-display_results(out)
-
-nn_2channel = NeuralNet(inp=40+16)
+# for nn_2channel
 ni_train_tensor = torch.stack(ni_train) # now a 2D tensor
 pp01_train_tensor = torch.stack(pp01_train)
 combined_train = torch.cat((ni_train_tensor, pp01_train_tensor), dim=1)
@@ -62,5 +56,79 @@ combined_train = torch.cat((ni_train_tensor, pp01_train_tensor), dim=1)
 ni_val_tensor = torch.stack(ni_val)
 pp01_val_tensor = torch.stack(pp01_val)
 combined_val = torch.cat((ni_val_tensor, pp01_val_tensor), dim=1)
-# training with both ni and pp01 as inputs
-train_nn(nn_2channel, combined_train, avg_decisions_train, combined_val, avg_decisions_val)
+
+# experiment section
+batch_sizes = list(range(5, 20, 5))
+epochs = list(range(20, 50, 5))
+learning_rates = [0.001, 0.005, 0.01, 0.015]
+
+print(f"testing the following: \n",
+      f"- {batch_sizes=}\n", 
+      f"- {epochs=}\n", 
+      f"- {learning_rates=}")
+
+full_loop = input("Full loop? (y/n): ")
+one_run = True if full_loop == 'n' else False
+
+if one_run: 
+    nn_ni = NeuralNet(16)
+    # training with ni as the input, which has 16 values
+    out = train_nn(nn_ni, ni_train, avg_decisions_train, ni_val, avg_decisions_val)
+    display_results(out)
+
+    nn_pp01 = NeuralNet(40)
+    # training with pp01 as the input, which has 40 values
+    out = train_nn(nn_pp01, pp01_train, avg_decisions_train, pp01_val, avg_decisions_val)
+    display_results(out)
+
+    nn_2channel = NeuralNet(inp=40+16)
+    # training with both ni and pp01 as inputs
+    out = train_nn(nn_2channel, combined_train, avg_decisions_train, combined_val, avg_decisions_val)
+    display_results(out)
+
+else: 
+    model_n = input("Which model? Enter 'n' for ni, 'p' for pp01, and '2' for combined: ")
+
+    lowest_test_loss = np.inf
+    lowest_test_loss_hyperparams = []
+    best_test_loss_imp = -np.inf
+    best_test_loss_imp_hyperparams = []
+
+    print("\n====TRAINING====")
+    with tqdm(total=len(batch_sizes)*len(epochs)*len(learning_rates)) as pbar:
+        for batch_size in batch_sizes: 
+            for epoch_n in epochs: 
+                for learning_rate in learning_rates: 
+                    if model_n == 'n': 
+                        model = NeuralNet(16)
+                        out = train_nn(model, ni_train, avg_decisions_train, ni_val, avg_decisions_val, n_epoch=epoch_n, n_batch_size=batch_size, learning_rate=learning_rate)
+                    elif model_n == 'p': 
+                        model = NeuralNet(40)
+                        out = out = train_nn(model, pp01_train, avg_decisions_train, pp01_val, avg_decisions_val, n_epoch=epoch_n, n_batch_size=batch_size, learning_rate=learning_rate)
+                    elif model_n == '2': # model_n == '2'
+                        model = NeuralNet(16+40)
+                        out = train_nn(model, combined_train, avg_decisions_train, combined_val, avg_decisions_val, n_epoch=epoch_n, n_batch_size=batch_size, learning_rate=learning_rate)
+                    # display_results(out)
+                    for i, loss in enumerate(out['test_losses']): 
+                        if loss < lowest_test_loss: 
+                            lowest_test_loss = loss
+                            lowest_test_loss_hyperparams = {'batch_size': batch_size, 'total_epoch_n': epoch_n,'learning_rate': learning_rate, 'occurred_at_epoch': (i+1)*5} # bc report every is set to 5
+                    if out['avg_test_loss_improvement'] > best_test_loss_imp: 
+                        best_test_loss_imp = out['avg_test_loss_improvement']
+                        best_test_loss_imp_hyperparams = {'batch_size': batch_size, 'total_epoch_n': epoch_n,'learning_rate': learning_rate}
+                    pbar.update(1)
+                    print("\n\n")
+    
+    print("\n====REPORT====")
+    print(f"Best test loss: {lowest_test_loss}")
+    print(f"Hyperparams: ")
+    display_results(lowest_test_loss_hyperparams)
+    print("")
+    
+    print(f"Best test loss improvement: {best_test_loss_imp}")
+    print(f"Hyperparams: ")
+    display_results(best_test_loss_imp_hyperparams)
+
+
+print("\n====FOR COMPARISON====")
+get_avg_baseline(avg_decisions_train, avg_decisions_val)

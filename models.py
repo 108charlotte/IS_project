@@ -4,7 +4,7 @@ import torch
 from torch import nn
 
 class NeuralNet(nn.Module): 
-    def __init__(self, inp=1, l_1=8, out=2): # outputs between 0 and 1 where 0 means more likely to choose decision 1 and 1 means more likely to choose decision 2
+    def __init__(self, inp=1, l_1=8, out=1): # outputs between 0 and 1 where 0 means more likely to choose decision 1 and 1 means more likely to choose decision 2
         super(NeuralNet, self).__init__()
         self.layer_1 = nn.Sequential(
             nn.Linear(inp, l_1), 
@@ -24,6 +24,7 @@ class PredictiveCodingRNN(nn.Module):
         super(PredictiveCodingRNN, self).__init__()
         self.rnn = nn.RNN(inp, l_1)
         self.to_out = nn.Linear(l_1, out)
+        # self.sigmoid = nn.Sigmoid()
     
     def forward(self, tensor): 
         rnn_out, hidden = self.rnn(tensor)
