@@ -3,6 +3,7 @@ from data_cleaning import cols_btw
 import torch
 from training_functions import train_rnn
 from models import PredictiveCodingRNN
+from sklearn.model_selection import train_test_split
 
 df = pd.read_csv("data_with_computer_decisions.csv")
 
@@ -18,6 +19,18 @@ computer_decisions = df[computer_decision_cols]
 # print("computer decisions")
 # print(computer_decisions)
 
+# retrieving player score cols
+player_score_cols = cols_btw("VI03_01", "VI03_30")
+player_scores = df[player_score_cols]
+
+# calculating payoff by taking new score - old score
+player_payoffs = player_scores.diff(axis=1).iloc[:, 1:]
+print(player_payoffs)
+
+# same thing, but for computers
+computer_score_cols = cols_btw("VI05_01", "VI05_30")
+computer_scores = df[computer_score_cols]
+computer_payoffs = computer_scores.diff(axis=1).iloc[:, 1:] # axis = 1 calculates differences btw cols
 
 # computer decision as input, player decision as output --> repeat
 
@@ -29,24 +42,39 @@ player_decision_tensors = []
 for i in range(len(player_decisions)): 
     player_decision_tensors.append(torch.tensor(player_decisions.iloc[i].values))
 
+player_payoff_tensors = []
+for i in range(len(player_payoffs)): 
+    player_payoff_tensors.append(torch.tensor(player_payoffs.iloc[i].values))
+
 computer_decision_tensors = []
 for i in range(len(computer_decisions)): 
     computer_decision_tensors.append(torch.tensor(computer_decisions.iloc[i].values))
 
-# TODO: randomize this
-train_player_decisions = player_decision_tensors[:164]
-train_computer_decisions = computer_decision_tensors[:164]
+computer_payoff_tensors = []
+for i in range(len(computer_payoffs)): 
+    computer_payoff_tensors.append(torch.tensor(computer_payoffs.iloc[i].values))
 
-val_player_decisions = player_decision_tensors[164:185]
-val_computer_decisions = computer_decision_tensors[164:185]
+def split_into_train_val_test(to_split, test_size=0.1, val_size=0.1): # pass in an list of lists
+    split_data = train_test_split(*to_split, test_size=test_size+val_size)
+    train = split_data[::2]
+    test_val = split_data[1::2]
+    split_test_val = train_test_split(*test_val, test_size=test_size)
+    val = split_test_val[::2]
+    test = split_test_val[1::2]
+    return train, val, test
 
-test_player_decisions = player_decision_tensors[185:206]
-test_computer_decisions = computer_decision_tensors[185:206]
+all_trains, all_vals, all_tests = split_into_train_val_test((computer_decision_tensors, player_decision_tensors, computer_payoff_tensors, player_payoff_tensors))
+
+# key: 
+# 0 = player_decisions
+# 1 = computer_decisions
+# 2 = player_payoffs
+# 3 = computer_payoffs
 
 from testing_functions import get_majority_baseline
-get_majority_baseline(val_player_decisions)
+get_majority_baseline(all_vals[1])
 
-rnn = PredictiveCodingRNN(2, 8, 2)
-train_rnn(rnn, train_computer_decisions, train_player_decisions, val_computer_decisions, val_player_decisions) # passing in lists of 1D tensors
+rnn = PredictiveCodingRNN(2, 8, 2) # list of their decisions, list of their opponent's decisions, list of their payoffs, list of their opponent's payoffs
+train_rnn(rnn, all_trains, all_vals) # passing in lists of 1D tensors
 
 # model validation

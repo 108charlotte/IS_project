@@ -5,7 +5,8 @@ import random
 import numpy as np
 from scipy.stats import linregress # https://stackoverflow.com/questions/9538525/calculating-slopes-in-numpy-or-scipy
 
-def train_nn(nn, input_data=[], targets=[], test_data=[], test_targets=[], n_epoch=40, n_batch_size=10, report_every=5, learning_rate=0.001, criterion=nn.MSELoss()): 
+def train_nn(nn, input_data=[], targets=[], test_data=[], test_targets=[], n_epoch=40, n_batch_size=10, report_every=5, learning_rate=0.001, criterion=nn.MSELoss(), random_seed=None): # seed is for batching
+    random.seed(random_seed) # for batching
     current_loss = 0
     all_losses = []
     all_test_losses = []
@@ -78,25 +79,39 @@ def train_nn(nn, input_data=[], targets=[], test_data=[], test_targets=[], n_epo
         'avg_test_loss_improvement': linregress(list(range(len(all_test_losses))), all_test_losses).slope
     }
 
-
+# not given payoff information - its not trying to maximize its payoff, its trying to mimic how behavior develops
 def create_input_tensor(computer_decisions, player_decisions, player, decision): 
-    input_tensor = torch.stack((computer_decisions[player][decision], torch.tensor(0) if decision == 0 else player_decisions[player][decision-1])).reshape(1,2) # decision=0 represents no previous decision
+    # combines computer decision & most recent player decision
+    input_tensor = torch.stack((computer_decisions[player][decision], torch.tensor(0) if decision == 0 else player_decisions[player][decision-1]), ).reshape(1,2) # decision=0 represents no previous decision
     input_tensor = input_tensor.to(torch.float32)
     return input_tensor
 
-def train_rnn(rnn, computer_decisions, player_decisions, val_computer_decisions, val_player_decisions, n_epoch=50, n_batch_size=10, report_every=5, learning_rate=0.001, criterion=nn.CrossEntropyLoss()): 
+def unpack_rnn_input(data): 
+    # d = decisions, p = payoffs
+    return {'cd': data[0], 
+            'pd': data[1], 
+            'cp': data[2], 
+            'pp': data[3], 
+        }
+
+# need to have train/val computer and player payoffs
+# need to not have to pass so much input stuff in
+def train_rnn(rnn, train_data, val_data, n_epoch=50, n_batch_size=10, report_every=5, learning_rate=0.001, criterion=nn.CrossEntropyLoss()): 
     current_loss = 0
     all_losses = []
     all_accuracies = []
     optimizer = torch.optim.Adam(rnn.parameters(), lr=learning_rate)
 
-    print(f"Training on dataset with n={len(computer_decisions)}")
+    u_train = unpack_rnn_input(train_data)
+    u_val = unpack_rnn_input(val_data)
+
+    print(f"Training on dataset with n={len(u_train['pd'])}")
 
     for k in range(1, n_epoch + 1): 
         rnn.train()
         rnn.zero_grad()
 
-        batches = list(range(len(computer_decisions)))
+        batches = list(range(len(u_train['cd'])))
         random.shuffle(batches)
         n_batches = int(np.ceil(len(batches) / n_batch_size)) # rounding up to the total # of batches, since if there's any extra few data points those should go in their own batch
         batches = np.array_split(batches, n_batches)
@@ -105,11 +120,11 @@ def train_rnn(rnn, computer_decisions, player_decisions, val_computer_decisions,
         for idx, batch in enumerate(batches): 
             batch_loss = 0
             for player in batch: # single decision
-                for decision in range(len(computer_decisions[player])): 
-                    input_tensor = create_input_tensor(computer_decisions, player_decisions, player, decision)
+                for decision in range(len(u_train['cd'][player])): 
+                    input_tensor = create_input_tensor(u_train['cd'], u_train['pd'], player, decision)
                     output = rnn.forward(input_tensor)
                     # print(f"{output=}")
-                    loss = criterion(output, player_decisions[player][decision].long()-1) # make correct datatype for loss calc
+                    loss = criterion(output, u_train['pd'][player][decision].long()-1) # make correct datatype for loss calc
                     batch_loss += loss
             
             batch_loss.backward()
@@ -125,14 +140,14 @@ def train_rnn(rnn, computer_decisions, player_decisions, val_computer_decisions,
             rnn.eval()
             with torch.no_grad(): 
                 batch_acc = []
-                for player in range(len(val_computer_decisions)): # this setup is different and may be wrong. TODO: check this
-                    for decision in range(len(val_computer_decisions[player])): 
-                        input_tensor = create_input_tensor(val_computer_decisions, val_player_decisions, player, decision)
+                for player in range(len(u_val['cd'])): # this setup is different and may be wrong. TODO: check this
+                    for decision in range(len(u_val['cd'][player])): 
+                        input_tensor = create_input_tensor(u_val['cd'], u_val['pd'], player, decision)
                         output = rnn(input_tensor)
                         # print(f"output: {output}")
                         player_decision_pred = output.argmax(dim=0).item() # gets the index of the highest likelihood
                         # print(f"player decision pred: {player_decision_pred}")
-                        correct = (player_decision_pred == (val_player_decisions[player][decision]).long() - 1)
+                        correct = (player_decision_pred == (u_val['pd'][player][decision]).long() - 1)
                         batch_acc.append(1 if correct else 0)
                 
                 # print("batch acc: ")
@@ -145,4 +160,4 @@ def train_rnn(rnn, computer_decisions, player_decisions, val_computer_decisions,
         current_loss = 0
 
     print(f"done training, \t avg improvement in losses: {linregress(list(range(len(all_losses))), all_losses).slope:.4f} \t avg improvement in test accuracies: {linregress(list(range(len(all_accuracies))), all_accuracies).slope:.4f}")
-    return {'num_batches': len(computer_decisions), 'all_losses': all_losses}
+    return {'num_batches': len(u_train['cd']), 'all_losses': all_losses}

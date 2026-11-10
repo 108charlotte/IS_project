@@ -61,11 +61,13 @@ combined_val = torch.cat((ni_val_tensor, pp01_val_tensor), dim=1)
 batch_sizes = list(range(5, 20, 5))
 epochs = list(range(20, 50, 5))
 learning_rates = [0.001, 0.005, 0.01, 0.015]
+random_seeds = [2, 4, 6, 9, 42, 109]
 
 print(f"testing the following: \n",
       f"- {batch_sizes=}\n", 
       f"- {epochs=}\n", 
-      f"- {learning_rates=}")
+      f"- {learning_rates=}\n", 
+      f"- {random_seeds=}")
 
 full_loop = input("Full loop? (y/n): ")
 one_run = True if full_loop == 'n' else False
@@ -95,20 +97,24 @@ else:
     best_test_loss_imp_hyperparams = []
 
     print("\n====TRAINING====")
-    with tqdm(total=len(batch_sizes)*len(epochs)*len(learning_rates)) as pbar:
+    with tqdm(total=len(batch_sizes)*len(epochs)*len(learning_rates)*len(random_seeds)) as pbar:
         for batch_size in batch_sizes: 
             for epoch_n in epochs: 
                 for learning_rate in learning_rates: 
-                    if model_n == 'n': 
-                        model = NeuralNet(16)
-                        out = train_nn(model, ni_train, avg_decisions_train, ni_val, avg_decisions_val, n_epoch=epoch_n, n_batch_size=batch_size, learning_rate=learning_rate)
-                    elif model_n == 'p': 
-                        model = NeuralNet(40)
-                        out = out = train_nn(model, pp01_train, avg_decisions_train, pp01_val, avg_decisions_val, n_epoch=epoch_n, n_batch_size=batch_size, learning_rate=learning_rate)
-                    elif model_n == '2': # model_n == '2'
-                        model = NeuralNet(16+40)
-                        out = train_nn(model, combined_train, avg_decisions_train, combined_val, avg_decisions_val, n_epoch=epoch_n, n_batch_size=batch_size, learning_rate=learning_rate)
-                    # display_results(out)
+                    # I only want to look at the average test loss and improvement across multiple random seeds so things are standardized rather than thinking one model is better because it performed better on a certain random seed
+                    avg_test_loss = None
+                    avg_test_loss_imp = None
+                    for random_seed in random_seeds: 
+                        if model_n == 'n': 
+                            model = NeuralNet(16)
+                            out = train_nn(model, ni_train, avg_decisions_train, ni_val, avg_decisions_val, n_epoch=epoch_n, n_batch_size=batch_size, learning_rate=learning_rate, random_seed=random_seed)
+                        elif model_n == 'p': 
+                            model = NeuralNet(40)
+                            out = out = train_nn(model, pp01_train, avg_decisions_train, pp01_val, avg_decisions_val, n_epoch=epoch_n, n_batch_size=batch_size, learning_rate=learning_rate, random_seed=random_seed)
+                        elif model_n == '2': # model_n == '2'
+                            model = NeuralNet(16+40)
+                            out = train_nn(model, combined_train, avg_decisions_train, combined_val, avg_decisions_val, n_epoch=epoch_n, n_batch_size=batch_size, learning_rate=learning_rate, random_seed=random_seed)
+
                     for i, loss in enumerate(out['test_losses']): 
                         if loss < lowest_test_loss: 
                             lowest_test_loss = loss
