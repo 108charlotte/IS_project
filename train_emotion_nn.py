@@ -49,10 +49,9 @@ for index, row in df.iterrows():
         input_data.append(torch.tensor(emotions.to_numpy()))
         result.append(torch.tensor(decision))
 
-
 input_train, input_val_test, result_train, result_val_test = train_test_split(input_data, result, test_size=0.2, train_size=0.8)
 input_val, input_test, result_val, result_test = train_test_split(input_val_test, result_val_test, test_size=0.5, train_size=0.5)
 
-nn = NeuralNet(20, 8, 1)
+nn = NeuralNet(20)
 out = train_nn(nn, input_train, result_train, input_val, result_val)
 print(f"{out=}")

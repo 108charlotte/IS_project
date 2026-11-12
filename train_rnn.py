@@ -74,7 +74,7 @@ all_trains, all_vals, all_tests = split_into_train_val_test((computer_decision_t
 from testing_functions import get_majority_baseline
 get_majority_baseline(all_vals[1])
 
-rnn = PredictiveCodingRNN(2, 8, 2) # list of their decisions, list of their opponent's decisions, list of their payoffs, list of their opponent's payoffs
+rnn = RNN(2, 8, 2) # list of their decisions, list of their opponent's decisions, list of their payoffs, list of their opponent's payoffs
 train_rnn(rnn, all_trains, all_vals) # passing in lists of 1D tensors
 
 # model validation

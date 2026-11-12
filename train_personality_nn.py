@@ -35,16 +35,11 @@ for i in range(len(player_decisions)):
     avg_decisions.append(torch.tensor(np.mean(player_decisions.iloc[i, :])))
 # something to look into: does personality play a bigger impact at certain moments, ex. the beginning or middle of a game? 
 
-'''
-notes: 
-- significant negative corelation btw fearless dominance & cooperation
-'''
-
 def display_results(training_func_out): # want to add optional charts later
     output = json.dumps(training_func_out, indent=4, sort_keys=True)
     print(output)
 
-# TODO: update rnn code to also use this function
+
 ni_train, ni_val_test, pp01_train, pp01_val_test, avg_decisions_train, avg_decisions_val_test = train_test_split(ni_tensors,pp01_tensors, avg_decisions, test_size=0.2, train_size=0.8)
 ni_val, ni_test, pp01_val, pp01_test, avg_decisions_val, avg_decisions_test = train_test_split(ni_val_test, pp01_val_test, avg_decisions_val_test, test_size=0.5, train_size=0.5)
 
@@ -59,7 +54,7 @@ combined_val = torch.cat((ni_val_tensor, pp01_val_tensor), dim=1)
 
 # experiment section
 batch_sizes = list(range(5, 20, 5))
-epochs = list(range(20, 50, 5))
+epochs = list(range(20, 40, 5))
 learning_rates = [0.001, 0.005, 0.01, 0.015]
 random_seeds = [2, 4, 6, 9, 42, 109]
 
@@ -97,35 +92,54 @@ else:
     best_test_loss_imp_hyperparams = []
 
     print("\n====TRAINING====")
-    with tqdm(total=len(batch_sizes)*len(epochs)*len(learning_rates)*len(random_seeds)) as pbar:
+
+    all_results = []
+    with tqdm(total=len(batch_sizes)*len(epochs)*len(learning_rates)) as pbar:
         for batch_size in batch_sizes: 
             for epoch_n in epochs: 
                 for learning_rate in learning_rates: 
                     # I only want to look at the average test loss and improvement across multiple random seeds so things are standardized rather than thinking one model is better because it performed better on a certain random seed
-                    avg_test_loss = None
-                    avg_test_loss_imp = None
+                    all_test_losses_each_epoch = []
+                    all_test_loss_improvements = []
+                    avg_test_losses_each_epoch = [] # calculate using the above once loop is over
+                    avg_test_loss_improvement = np.inf
+
                     for random_seed in random_seeds: 
                         if model_n == 'n': 
                             model = NeuralNet(16)
                             out = train_nn(model, ni_train, avg_decisions_train, ni_val, avg_decisions_val, n_epoch=epoch_n, n_batch_size=batch_size, learning_rate=learning_rate, random_seed=random_seed)
                         elif model_n == 'p': 
                             model = NeuralNet(40)
-                            out = out = train_nn(model, pp01_train, avg_decisions_train, pp01_val, avg_decisions_val, n_epoch=epoch_n, n_batch_size=batch_size, learning_rate=learning_rate, random_seed=random_seed)
+                            out = train_nn(model, pp01_train, avg_decisions_train, pp01_val, avg_decisions_val, n_epoch=epoch_n, n_batch_size=batch_size, learning_rate=learning_rate, random_seed=random_seed)
                         elif model_n == '2': # model_n == '2'
                             model = NeuralNet(16+40)
                             out = train_nn(model, combined_train, avg_decisions_train, combined_val, avg_decisions_val, n_epoch=epoch_n, n_batch_size=batch_size, learning_rate=learning_rate, random_seed=random_seed)
 
-                    for i, loss in enumerate(out['test_losses']): 
-                        if loss < lowest_test_loss: 
-                            lowest_test_loss = loss
-                            lowest_test_loss_hyperparams = {'batch_size': batch_size, 'total_epoch_n': epoch_n,'learning_rate': learning_rate, 'occurred_at_epoch': (i+1)*5} # bc report every is set to 5
-                    if out['avg_test_loss_improvement'] > best_test_loss_imp: 
-                        best_test_loss_imp = out['avg_test_loss_improvement']
-                        best_test_loss_imp_hyperparams = {'batch_size': batch_size, 'total_epoch_n': epoch_n,'learning_rate': learning_rate}
+                        losses = out['test_losses']
+                        all_test_losses_each_epoch.append(losses)
+                        all_test_loss_improvements.append(out['avg_test_loss_improvement'])
+
+                    for epoch in range(epoch_n//5): 
+                        all_losses_this_epoch = [all_test_losses_each_epoch[i][epoch] for i in range(len(all_test_losses_each_epoch))]
+                        avg_test_loss_this_epoch = np.mean(all_losses_this_epoch)
+                        avg_test_losses_each_epoch.append(avg_test_loss_this_epoch)
+                    
+                    avg_test_loss_improvement = np.mean(all_test_loss_improvements)
+                    
+                    result_dict = {'epoch_avg_losses': avg_test_losses_each_epoch, 'avg_test_loss_improvement': avg_test_loss_improvement, 'batch_size': batch_size, 'total_epoch_n': epoch_n,'learning_rate': learning_rate, 'best_loss_occurred_at_epoch': ((avg_test_losses_each_epoch.index(min(avg_test_losses_each_epoch))+1)*5)}
+                    if min(avg_test_losses_each_epoch) < lowest_test_loss: 
+                        lowest_test_loss = min(avg_test_losses_each_epoch)
+                        lowest_test_loss_hyperparams = result_dict
+                    if avg_test_loss_improvement < best_test_loss_imp: 
+                        best_test_loss_imp = avg_test_loss_improvement
+                        best_test_loss_imp_hyperparams = result_dict
+                    
+                    all_results.append(result_dict)
                     pbar.update(1)
                     print("\n\n")
     
     print("\n====REPORT====")
+
     print(f"Best test loss: {lowest_test_loss}")
     print(f"Hyperparams: ")
     display_results(lowest_test_loss_hyperparams)
