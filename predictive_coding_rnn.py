@@ -51,13 +51,15 @@ class PredictiveCodingNetwork(nn.Module):
 
     def compute_errors(self, inputs_latents): 
         errors, gain_modulated_errors = [], [] # gain modulated errors are errors scaled by activations, so there's a nonlinearity in the error I think? 
+        all_activations = []
         for l, layer in enumerate(self.layers): 
             x_hat, a = self.predict_latents(layer, inputs_latents[l+1])
+            all_activations.append(a)
             err = inputs_latents[l] - x_hat # actual latent minus predicted latent (eps latent)
             gm_err = err*layer.activation_deriv(a)
             errors.append(err)
             gain_modulated_errors.append(gm_err)
-        return errors, gain_modulated_errors
+        return errors, gain_modulated_errors, all_activations
     
     def calculate_latent_grad(self, error_latent, gain_mod_error_last_latent, weights_last_latent): 
         # error at the layer - the weight at the last layer times the weighted error at the last layer
@@ -71,12 +73,14 @@ class PredictiveCodingNetwork(nn.Module):
     # derivative tells you how sensitive a neuron's output is to changes in its input - things that have large derivatives will therefore be adapted more, smaller derivatives adapted less
     # same with error - things with larger error will be adapted more, smaller error less
     # this is basic backpropagation
+    '''
     def calculate_weight_grad(self, error_latent, activation_latent, ) # T means transpose a matrix; gradient for the weights is 
         grad_wl = -(error_latent)
+    '''
 
     def infer(self, inputs_latents, eta_infer): # x-input = x-batch
         working_inputs_latents = copy.deepcopy(inputs_latents) # bc I'm worried that I'll accidentally update the original latent_states list otherwise; used https://stackoverflow.com/questions/17873384/how-to-deep-copy-a-list
-        errors, gain_modulated_errors = self.compute_errors(inputs_latents)
+        errors, gain_modulated_errors, all_activations = self.compute_errors(inputs_latents)
 
         # update latents based on errors
         for l in range(1, self.L + 1): 
@@ -88,19 +92,20 @@ class PredictiveCodingNetwork(nn.Module):
             # TODO: fix how I'm handling input latents' size, bc its dimensions are all weird bc of batching
             working_inputs_latents[l] -=  eta_infer * grad_xl
 
-        return working_inputs_latents, errors, gain_modulated_errors
+        return working_inputs_latents, errors, gain_modulated_errors, all_activations
 
-    def inference(self, T_infer, x_batch, eta_infer): 
+    def inference(self, T_infer, x_batch, last_activations, eta_infer): 
         with torch.no_grad(): 
-            inputs_latents = [x_batch] + self.init_latents(len(x_batch))
-            all_errors, all_gm_errors = [], []
+            inputs_latents = [x_batch] + [last_activations] + self.init_latents(len(x_batch))
+            all_errors, all_gm_errors, all_activations = [], [], []
 
             for t in range(1, T_infer + 1): 
-                inputs_latents, errors, gain_modulated_errors = self.infer(inputs_latents, eta_infer)
+                inputs_latents, errors, gain_modulated_errors, activations = self.infer(inputs_latents, eta_infer)
                 all_errors.append(errors)
                 all_gm_errors.append(gain_modulated_errors)
+                all_activations.append(activations) # creates a nested list
 
-        return inputs_latents, all_errors, all_gm_errors
+        return inputs_latents, all_errors, all_gm_errors, all_activations
     
     def learn(self, x_batch, y_batch, inputs_latents, eta_learn): 
         with torch.no_grad(): # handling weight updates manually; don't want pytorch automatic updates to interfere
@@ -124,6 +129,7 @@ class PredictiveCodingNetwork(nn.Module):
 
         return inputs_latents, all_errors, all_gm_errors # I'm not sure if/how these will be useful, but I do want something I can use to measure the accuracy of training
 
+# TODO: make defense for why I chose two PCN layers
 class PredictiveCodingRNN(nn.ModuleList): 
     def __init__(self, n_time_steps, nn_dims, nn_output_dim, activation_fn=torch.relu, activation_deriv=lambda a: (a > 0).float()): # nn_dims will be 2 for me, plus 1 output layer
         super().__init__()
@@ -136,12 +142,35 @@ class PredictiveCodingRNN(nn.ModuleList):
         return supervised_energy, latent_energy
     
     def forward_train(self, x_batch, y_batch, T_infer, eta_infer, eta_learn): # eta_infer is learning rate
+        '''
+        Goes through each PCN in the RNN and trains it to predict its elements of y_batch given its elements of x_batch
+        '''
+        # TODO: pass activations to the next step
         # x_batch is a sequence of pd decisions
         # go through each PCN and train it separately, with the others frozen
+        last_activations = [] # TODO: figure out what to do for the first step where there are no past activations
+        errors_latents, gm_errors_latents, errors_learn, gm_errors_learn = [], [], [], []
         for i, pcn in enumerate(self.steps): 
             this_pcn_x = x_batch[i] # NOTE: x_batch needs to have the format: d1 is step, d2 is sequence of timesteps, d3 is player decision + computer decision
             this_pcn_y = y_batch[i] # same note applies here
-            inputs_latents, all_errors_latents, all_gm_errors_latents = pcn.inference(T_infer, this_pcn_x, eta_infer)
+            inputs_latents, all_errors_latents, all_gm_errors_latents, activations = pcn.inference(T_infer, this_pcn_x, last_activations, eta_infer)
             inputs_latents, all_errors_learn, all_gm_errors_learn = pcn.learn(this_pcn_x, this_pcn_y, inputs_latents, eta_learn)
-            
-            return all_errors_latents, all_gm_errors_latents, all_errors_learn, all_gm_errors_learn
+            last_activations = activations
+
+            errors_latents.append(all_errors_latents)
+            gm_errors_latents.append(all_gm_errors_latents)
+            errors_learn.append(all_errors_learn)
+            gm_errors_learn.append(all_gm_errors_learn)
+
+        return errors_latents, gm_errors_latents, errors_learn, gm_errors_learn
+
+    def forward_test(self, x_batch, T_infer, eta_infer): 
+        all_y_preds = []
+        last_activations = []
+        for i, pcn in enumerate(self.steps): 
+            this_pcn_x = x_batch[i] # needs to have the same format as x_batch in forward_train
+            inputs_latents, all_errors_latents, all_gm_errors_latents = pcn.inference(T_infer, this_pcn_x, last_activations, eta_infer)
+            last_latent = inputs_latents[len(inputs_latents)-1]
+            y_pred = pcn.readout(last_latent)
+            all_y_preds.append(y_pred)
+        return all_y_preds
