@@ -5,7 +5,6 @@ from training_functions import train_nn
 from models import NeuralNet
 import numpy as np
 from sklearn.model_selection import train_test_split
-import json
 from tqdm.auto import tqdm
 from testing_functions import get_avg_baseline
 

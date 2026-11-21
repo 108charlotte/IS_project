@@ -54,7 +54,7 @@ combined_val = torch.cat((ni_val_tensor, pp01_val_tensor), dim=1)
 
 # experiment section
 batch_sizes = list(range(5, 20, 5))
-epochs = list(range(20, 40, 5))
+epochs = list(range(20, 30, 5))
 learning_rates = [0.001, 0.005, 0.01, 0.015]
 random_seeds = [2, 4, 6, 9, 42, 109]
 
