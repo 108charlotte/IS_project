@@ -1,12 +1,12 @@
-from predictive_coding_rnn import PredictiveCodingRNN
+from pcrnn import PredictiveCodingRNN
 import pandas as pd
 from data_cleaning import cols_btw
 import torch
 from sklearn.model_selection import train_test_split
 
-pcrnn = PredictiveCodingRNN(29, [5*2, 5*1], 5*29*1)
-
 batch_size = 5
+# TODO: confirm that dimensions are all correct
+pcrnn = PredictiveCodingRNN(29, [2, 10, 5], 1) # 2 is input, 10 is 1st latent state, 5 is next latent state, 1 is output
 
 # creating x and y batches w/ size batch_size
 df = pd.read_csv("data_with_computer_decisions.csv")
@@ -35,47 +35,56 @@ def split_into_train_val_test(to_split, test_size=0.1, val_size=0.1): # pass in 
 
 all_trains, all_vals, all_tests = split_into_train_val_test((computer_decision_tensors, player_decision_tensors))
 
-all_trains_tuples = []
-for i, item in enumerate(all_trains[0]): 
-    all_trains_tuples.append((item, all_trains[1][i]))
+# structure of all_trains: 
+# - 1st dimension (tuple) is cd versus pd
+# - 2nd dimension (list of tensors) are scenarios (these comprise batches)
+# - 3rd dimension (tensors) are sequences of decisions
 
-inputs = []
-labels = []
+# first, I need to stack pd and cd separately into their own tensors
+all_trains = [torch.stack(decision_type) for decision_type in all_trains]
 
-for computer, player in all_trains_tuples: 
-    x = [computer[:-1], player[:-1]]
-    y = [player[2:]]
-    print(f"{x=}, {y=}")
-    inputs.append(x)
-    labels.append(y)
+# next, combine cd and pd into tensor dimensions
+all_trains = torch.stack(all_trains).float() # so its the right type for the rnn
+
+print(f"{all_trains.shape=}")
 
 # TODO: I couldn't find one of the printed decision series in the data. I need to figure out what caused that/what's going on
+# NOTE: the paper doesn't clarify who made the first move. I'm assuming the player, but I know this could be wrong since I'm making an assumption
 
-# TODO: unknown from the paper who made the first move. I'm assuming the player, but I know this could be wrong since I'm making an assumption
+# x_batch (and therefore also all_trains) needs to have the format: d1 is step, d2 is sequence of timesteps, d3 is player decision + computer decision
+all_trains = all_trains.permute(2,1,0)
 
-x_batches = [inputs[i:i+batch_size] for i in range(0, len(inputs), batch_size)]
-y_batches = [labels[i:i+batch_size] for i in range(0, len(labels), batch_size)]
+print(f"{all_trains.shape=}")
 
-def train(pcrnn, n_epochs, x_batches, y_batches, batch_size, eta_infer, eta_learn, T_infer, T_learn): 
+x_batches = [all_trains[:-1, i:i+batch_size, :] for i in range(0, all_trains.shape[1], batch_size)] # purposefully doesn't include the last decision
+# TODO: remove computer decision from y_batches
+y_batches = [all_trains[1:, i:i+batch_size, 1:] for i in range(0, all_trains.shape[1], batch_size)] # purposefully doesn't include the first decision or computer decisions (only player decisions)
+
+
+def train(pcrnn, n_epochs, x_batches, y_batches, eta_infer, eta_learn, T_infer): 
     pcrnn.train()
-    energy_history, supervised_energy_history = [], []
+    error_history, gm_error_history = {'infer': [], 'learn': []}, {'infer': [], 'learn': []}
 
     for epoch in range(n_epochs): 
         print(f"Epoch {epoch+1} / {n_epochs}")
-        epoch_energies, epoch_supervised_energies = [], []
+        ep_e_infer, ep_gme_infer, ep_e_learn, ep_gme_learn = [], [], [], []
 
         for x_batch, y_batch in zip(x_batches, y_batches): 
-            print(f"{x_batch=}, {y_batch=}")
-            energies, supervised_energies = pcrnn.forward_train(x_batch, y_batch, batch_size, T_infer, T_learn, eta_infer, eta_learn)
+            # print(f"{x_batch=}, {y_batch=}")
+            e_latents, gme_latents, e_learn, gme_learn = pcrnn.forward_train(x_batch, y_batch, T_infer, eta_infer, eta_learn)
+
+            ep_e_infer.append(e_latents)
+            ep_gme_infer.append(gme_latents)
+            ep_e_learn.append(e_learn)
+            ep_gme_learn.append(gme_learn)
         
-            epoch_energies.append(energies)
-            epoch_supervised_energies.append(supervised_energies)
-        
-        energy_history.append(epoch_energies)
-        supervised_energy_history.append(epoch_supervised_energies)
+        error_history['infer'].append(ep_e_infer)
+        gm_error_history['infer'].append(ep_gme_infer)
+        error_history['learn'].append(ep_e_learn)
+        gm_error_history['learn'].append(ep_gme_learn)
     
-    return energy_history, supervised_energy_history
+    return error_history, gm_error_history
 
-e_hist, se_hist = train(pcrnn, 20, x_batches, y_batches, batch_size, 0.01, 0.0001, 5, 5)
+e_hist, gme_hist = train(pcrnn, 20, x_batches, y_batches, 0.01, 0.0001, 5)
 
-print(f"{e_hist=}, {se_hist=}")
+print(f"{e_hist=}, {gme_hist=}")
