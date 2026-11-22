@@ -3,6 +3,8 @@ import pandas as pd
 from data_cleaning import cols_btw
 import torch
 from sklearn.model_selection import train_test_split
+import matplotlib.pyplot as plt
+import numpy as np
 
 batch_size = 5
 # TODO: confirm that dimensions are all correct
@@ -78,13 +80,56 @@ def train(pcrnn, n_epochs, x_batches, y_batches, eta_infer, eta_learn, T_infer):
             ep_e_learn.append(e_learn)
             ep_gme_learn.append(gme_learn)
         
-        error_history['infer'].append(ep_e_infer)
-        gm_error_history['infer'].append(ep_gme_infer)
-        error_history['learn'].append(ep_e_learn)
-        gm_error_history['learn'].append(ep_gme_learn)
+        error_history['infer'].append(np.mean(ep_e_infer))
+        gm_error_history['infer'].append(np.mean(ep_gme_infer))
+        error_history['learn'].append(np.mean(ep_e_learn))
+        gm_error_history['learn'].append(np.mean(ep_gme_learn))
+
+        '''
+        avg_e_infer = np.mean(ep_e_infer)
+        avg_gme_infer = np.mean(ep_gme_infer)
+        avg_e_learn = np.mean(ep_e_learn)
+        avg_gme_learn = np.mean(ep_gme_learn)
+        '''
+
+        print(f"Epoch {epoch+1} / {n_epochs}, avg infer error: {np.mean(ep_e_infer):.5}, avg gme infer: {np.mean(ep_gme_infer):.5}, avg error learn: {np.mean(ep_e_learn):.5}, avg gme learn: {np.mean(ep_gme_learn):.5}")
     
     return error_history, gm_error_history
 
 e_hist, gme_hist = train(pcrnn, 20, x_batches, y_batches, 0.01, 0.0001, 5)
 
-print(f"{e_hist=}, {gme_hist=}")
+# print(f"{e_hist=}, {gme_hist=}")
+
+epochs = range(1, len(e_hist['infer'])+1)
+fig, axes = plt.subplots(2, 2, figsize=(12, 8))
+
+# Inference error
+axes[0, 0].plot(epochs, e_hist['infer'], marker='o')
+axes[0, 0].set_title("Error History (Infer)")
+axes[0, 0].set_xlabel("Epoch")
+axes[0, 0].set_ylabel("Error")
+axes[0, 0].grid(True)
+
+# Inference GME error
+axes[0, 1].plot(epochs, gme_hist['infer'], marker='o')
+axes[0, 1].set_title("GME Error History (Infer)")
+axes[0, 1].set_xlabel("Epoch")
+axes[0, 1].set_ylabel("GME Error")
+axes[0, 1].grid(True)
+
+# Learning error
+axes[1, 0].plot(epochs, e_hist['learn'], marker='o')
+axes[1, 0].set_title("Error History (Learn)")
+axes[1, 0].set_xlabel("Epoch")
+axes[1, 0].set_ylabel("Error")
+axes[1, 0].grid(True)
+
+# Learning GME error
+axes[1, 1].plot(epochs, gme_hist['learn'], marker='o')
+axes[1, 1].set_title("GME Error History (Learn)")
+axes[1, 1].set_xlabel("Epoch")
+axes[1, 1].set_ylabel("GME Error")
+axes[1, 1].grid(True)
+
+plt.tight_layout()
+plt.show()
