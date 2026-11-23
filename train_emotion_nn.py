@@ -4,7 +4,7 @@ import torch
 from training_functions import train_nn
 from models import NeuralNet
 import numpy as np
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import train_test_split, GroupShuffleSplit
 from tqdm.auto import tqdm
 from testing_functions import get_avg_baseline
 import matplotlib.pyplot as plt
@@ -36,6 +36,7 @@ round_col = df['round']
 
 input_data = []
 result = []
+participant_ids = []
 
 # can always toss 1st round decision and last round emotion
 for index, row in df.iterrows(): 
@@ -49,9 +50,28 @@ for index, row in df.iterrows():
 
         input_data.append(torch.tensor(emotions.to_numpy()))
         result.append(torch.tensor(decision))
+        participant_ids.append(df.loc[index, 'ID'])
 
-input_train, input_val_test, result_train, result_val_test = train_test_split(input_data, result, test_size=0.2, train_size=0.8)
-input_val, input_test, result_val, result_test = train_test_split(input_val_test, result_val_test, test_size=0.5, train_size=0.5)
+# https://scikit-learn.org/stable/modules/generated/sklearn.model_selection.GroupShuffleSplit.html
+splitter_1 = GroupShuffleSplit(n_splits=1, test_size=0.2) # TODO: potentially add a random state here
+splitter_2 = GroupShuffleSplit(n_splits=1, test_size=0.5)
+
+# only one fold (for now): just use next(): https://stackoverflow.com/questions/68152473/python-split-to-train-test-val-using-groupshufflesplit
+
+train_index, val_test_index = next(splitter_1.split(input_data, result, participant_ids))
+input_train = [input_data[i] for i in train_index]
+result_train = [result[i] for i in train_index]
+
+input_val_test = [input_data[i] for i in val_test_index]
+result_val_test = [result[i] for i in val_test_index]
+val_test_p_ids = np.array(participant_ids)[val_test_index]
+
+val_index, test_index = next(splitter_2.split(input_val_test, result_val_test, val_test_p_ids))
+input_val = [input_val_test[i] for i in val_index]
+result_val = [result_val_test[i] for i in val_index]
+input_test = [input_val_test[i] for i in test_index]
+result_test = [result_val_test[i] for i in test_index]
+
 
 report_every = 5 # for comprehensive loop; d lets you choose your own
 
@@ -60,9 +80,9 @@ loop = input("Full loop (l) or defined config (d): ")
 if loop == 'd': 
     nn = NeuralNet(20)
 
-    batch_size = int(input("Batch size (must be an integer): "))
     epochs = int(input("Number of epochs (must be an integer): "))
     learning_rate = float(input("Learning rate (must be a float): "))
+    batch_size = int(input("Batch size (must be an integer): "))
     report_every = int(input("Report every X epochs (must be an integer): "))
 
     out = train_nn(nn, input_train, result_train, input_val, result_val, n_epoch=epochs, n_batch_size=batch_size, report_every=report_every, learning_rate=learning_rate, accuracy=True)
@@ -106,7 +126,7 @@ else:
 
                     for rs in random_seeds: 
                         nn = NeuralNet(20)
-                        out = train_nn(nn, input_train, result_train, input_val, result_val, n_epoch=epoch, n_batch_size=batch_size, report_every=report_every, learning_rate=lr, random_seed=rs)
+                        out = train_nn(nn, input_train, result_train, input_val, result_val, n_epoch=epoch, n_batch_size=batch_size, report_every=report_every, learning_rate=lr, random_seed=rs, with_print=False)
                         if avg_loss == None: 
                             avg_loss = [0] * len(out['losses'])
                             avg_test_loss = [0] * len(out['test_losses'])

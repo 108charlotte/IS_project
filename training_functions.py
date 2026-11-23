@@ -5,20 +5,20 @@ import random
 import numpy as np
 from scipy.stats import linregress # https://stackoverflow.com/questions/9538525/calculating-slopes-in-numpy-or-scipy
 
-def train_nn(nn, input_data=[], targets=[], test_data=[], test_targets=[], n_epoch=40, n_batch_size=10, report_every=5, learning_rate=0.001, criterion=nn.MSELoss(), random_seed=None, with_print=True, accuracy=False): # seed is for batching
+def train_nn(model, input_data=[], targets=[], test_data=[], test_targets=[], n_epoch=40, n_batch_size=10, report_every=5, learning_rate=0.001, criterion=nn.MSELoss(), random_seed=None, with_print=True, accuracy=False): # seed is for batching
     random.seed(random_seed) # for batching
     current_loss = 0
     all_losses = []
     all_test_losses = []
     all_accuracies = []
-    nn.train()
-    optimizer = torch.optim.Adam(nn.parameters(), lr=learning_rate)
+    model.train()
+    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
 
     if with_print: print(f"Training on dataset with n={len(input_data)}, dims={(np.asarray(input_data)).shape}")
     
     for k in range(1, n_epoch + 1): 
-        nn.train()
-        nn.zero_grad()
+        model.train()
+        model.zero_grad()
         batches = list(range(len(input_data)))
         random.shuffle(batches)
         n_batches = int(np.ceil(len(batches) / n_batch_size)) # rounding up to the total # of batches, since if there's any extra few data points those should go in their own batch
@@ -32,51 +32,47 @@ def train_nn(nn, input_data=[], targets=[], test_data=[], test_targets=[], n_epo
                 # print(f"{input_data[batch]=}")
                 input_tensor = input_data[item].to(torch.float32)
                 # squeezing both to make them scalar-shaped tensors
-                output = nn(input_tensor).squeeze()
-                # print(f"{output=}")
-                # print(f"{output.shape=}")
-                # print(f"{output=}, {pred=}, {targets[item]=}")
+                output = model(input_tensor).squeeze()
                 target = (targets[item].float()-1).squeeze()
-                # print(f"{target=}")
-                # print(f"{target.shape=}")
+
                 loss = criterion(output, target)
                 batch_loss += loss
                 
             batch_loss.backward()
             optimizer.step()
             optimizer.zero_grad()
+            
             current_loss += batch_loss.item()
         
         all_losses.append(current_loss / len(input_data))
         
         if k % report_every == 0: 
             # calculate accuracy on validation set
-            nn.eval()
+            model.eval()
             with torch.no_grad(): 
                 test_batch_losses = []
                 accuracies = []
                 for item in range(len(test_data)): 
                     # print(f"batch: {batch}")
                     input_tensor = test_data[item].to(torch.float32)
-                    output = nn(input_tensor).squeeze()
+                    output = model(input_tensor).squeeze()
                     target = (test_targets[item].float()-1).squeeze()
                     loss = criterion(output, target)
                     test_batch_losses.append(loss)
 
                     if accuracy: 
                         pred = 1.0 if output > 0.5 else 0.0 # should be a float for comparison with target
-                        acc = (pred == target).mean().item()
+                        acc = (pred == target).float().mean().item()
                         accuracies.append(acc)
-                
-                # print("batch test loss: ")
-                # print(np.mean(test_batch_losses))
 
                 epoch_test_loss = float(np.mean(test_batch_losses))
                 all_test_losses.append(epoch_test_loss)
                 
-                all_accuracies.append(np.mean(accuracies))
+                if accuracy: all_accuracies.append(np.mean(accuracies))
                 
-            if with_print: print(f"{k} ({k / n_epoch:.3f}): \t average batch loss = {all_losses[-1]:.5f} \t average batch test loss = {all_test_losses[-1]:.5f}")
+            to_print_string = f"{k} ({k / n_epoch:.3f}): \t avg batch loss = {all_losses[-1]:.5f} \t avg batch test loss = {all_test_losses[-1]:.5f}"
+            if accuracy: to_print_string += f"\t avg batch acc = {all_accuracies[-1]}"
+            if with_print: print(to_print_string) # NOTE: accuracies and test losses may not update every epoch like all_losses does
 
         current_loss = 0
 

@@ -31,7 +31,7 @@ def display_results(out, report_every=None, charts=True, accuracy=False):
         axes[1].grid(True)
 
         if accuracy: # test accuracy, same x as test_x
-            axes[2].plot(test_x, out['accuracy'], marker='o')
+            axes[2].plot(test_x, out['accuracies'], marker='o')
             axes[2].set_title("Test Accuracy")
             axes[2].set_xlabel("Epoch")
             axes[2].set_ylabel("Accuracy")
