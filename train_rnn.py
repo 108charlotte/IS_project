@@ -2,7 +2,7 @@ import pandas as pd
 from data_cleaning import cols_btw
 import torch
 from training_functions import train_rnn
-from models import PredictiveCodingRNN
+from models import RNN
 from sklearn.model_selection import train_test_split
 
 df = pd.read_csv("data_with_computer_decisions.csv")

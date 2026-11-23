@@ -7,6 +7,7 @@ import numpy as np
 from sklearn.model_selection import train_test_split
 from tqdm.auto import tqdm
 from testing_functions import get_avg_baseline
+import matplotlib.pyplot as plt
 
 df = pd.read_csv("Fields.csv")
 
@@ -51,6 +52,32 @@ for index, row in df.iterrows():
 input_train, input_val_test, result_train, result_val_test = train_test_split(input_data, result, test_size=0.2, train_size=0.8)
 input_val, input_test, result_val, result_test = train_test_split(input_val_test, result_val_test, test_size=0.5, train_size=0.5)
 
+n_epochs = 100
+report_every = 5
 nn = NeuralNet(20)
-out = train_nn(nn, input_train, result_train, input_val, result_val)
-print(f"{out=}")
+out = train_nn(nn, input_train, result_train, input_val, result_val, n_epoch=n_epochs, report_every=report_every)
+
+# out = {
+#        'losses': all_losses, 
+#        'test_losses': all_test_losses, 
+#        'avg_loss_improvement': linregress(list(range(len(all_losses))), all_losses).slope, # could re-calculate back in train_nn file but why do it there if I've already done it here? 
+#        'avg_test_loss_improvement': linregress(list(range(len(all_test_losses))), all_test_losses).slope
+#    }
+
+train_epochs = range(1, n_epochs+1)
+test_epochs = range(1, n_epochs+1, report_every)
+fig, axes = plt.subplots(1, 2, figsize=(12, 8))
+
+axes[0].plot(train_epochs, out['losses'], marker='o')
+axes[0].set_title("Train Losses")
+axes[0].set_xlabel("Epoch")
+axes[0].set_ylabel("Loss")
+axes[0].grid(True)
+
+axes[1].plot(test_epochs, out['test_losses'], marker='o')
+axes[1].set_title("Validation Losses")
+axes[1].set_xlabel("Epoch")
+axes[1].set_ylabel("Loss")
+axes[1].grid(True)
+
+plt.show()

@@ -8,6 +8,7 @@ from sklearn.model_selection import train_test_split
 import json
 from tqdm.auto import tqdm
 from testing_functions import get_avg_baseline
+from visualization import display_results
 
 df = pd.read_csv("data_with_computer_decisions.csv")
 
@@ -35,11 +36,6 @@ for i in range(len(player_decisions)):
     avg_decisions.append(torch.tensor(np.mean(player_decisions.iloc[i, :])))
 # something to look into: does personality play a bigger impact at certain moments, ex. the beginning or middle of a game? 
 
-def display_results(training_func_out): # want to add optional charts later
-    output = json.dumps(training_func_out, indent=4, sort_keys=True)
-    print(output)
-
-
 ni_train, ni_val_test, pp01_train, pp01_val_test, avg_decisions_train, avg_decisions_val_test = train_test_split(ni_tensors,pp01_tensors, avg_decisions, test_size=0.2, train_size=0.8)
 ni_val, ni_test, pp01_val, pp01_test, avg_decisions_val, avg_decisions_test = train_test_split(ni_val_test, pp01_val_test, avg_decisions_val_test, test_size=0.5, train_size=0.5)
 
@@ -52,103 +48,161 @@ ni_val_tensor = torch.stack(ni_val)
 pp01_val_tensor = torch.stack(pp01_val)
 combined_val = torch.cat((ni_val_tensor, pp01_val_tensor), dim=1)
 
-# experiment section
-batch_sizes = list(range(5, 20, 5))
-epochs = list(range(20, 30, 5))
-learning_rates = [0.001, 0.005, 0.01, 0.015]
-random_seeds = [2, 4, 6, 9, 42, 109]
+report_every = 5
 
-print(f"testing the following: \n",
-      f"- {batch_sizes=}\n", 
-      f"- {epochs=}\n", 
-      f"- {learning_rates=}\n", 
-      f"- {random_seeds=}")
+def train_model(character_identifier, epochs, batch_size, lr, report_every, with_print, random_seed=None): 
+    match character_identifier: 
+        case 'n': 
+            out = train_nn(NeuralNet(16), ni_train, avg_decisions_train, ni_val, avg_decisions_val, n_epoch=epochs, n_batch_size=batch_size, learning_rate=lr, random_seed=random_seed, report_every=report_every, with_print=with_print)
+        case 'p': 
+            out = train_nn(NeuralNet(40), pp01_train, avg_decisions_train, pp01_val, avg_decisions_val, n_epoch=epochs, n_batch_size=batch_size, learning_rate=lr, random_seed=random_seed, report_every=report_every, with_print=with_print)
+        case 'c': 
+            out = train_nn(NeuralNet(16+40), combined_train, avg_decisions_train, combined_val, avg_decisions_val, n_epoch=epochs, n_batch_size=batch_size, learning_rate=lr, random_seed=random_seed, report_every=report_every, with_print=with_print)
+        case _: 
+            print(f"INVALID MODEL CHARACTER IDENTIFIER")
+            out = {}
+    return out
 
-full_loop = input("Full loop? (y/n): ")
-one_run = True if full_loop == 'n' else False
+loop = input("Full loop (l) or defined config (d): ")
 
-if one_run: 
-    nn_ni = NeuralNet(16)
-    # training with ni as the input, which has 16 values
-    out = train_nn(nn_ni, ni_train, avg_decisions_train, ni_val, avg_decisions_val)
-    display_results(out)
+if loop == 'd': 
+    model_input = input("NI, PP01, or combined? (n, p, c): ")
+    batch_size = int(input("Batch size (must be an integer): "))
+    epochs = int(input("Number of epochs (must be an integer): "))
+    learning_rate = float(input("Learning rate (must be a float): "))
+    report_every = int(input("Report every X epochs (must be an integer): "))
 
-    nn_pp01 = NeuralNet(40)
-    # training with pp01 as the input, which has 40 values
-    out = train_nn(nn_pp01, pp01_train, avg_decisions_train, pp01_val, avg_decisions_val)
-    display_results(out)
-
-    nn_2channel = NeuralNet(inp=40+16)
-    # training with both ni and pp01 as inputs
-    out = train_nn(nn_2channel, combined_train, avg_decisions_train, combined_val, avg_decisions_val)
-    display_results(out)
-
+    if model_input not in ['n', 'p', 'c']: 
+        print("Invalid model type. Please enter n, p, or c")
+    else: 
+        out = train_model(model_input, epochs, batch_size, learning_rate, report_every, True)
+        display_results(out, report_every, True) # want to see plots
 else: 
-    model_n = input("Which model? Enter 'n' for ni, 'p' for pp01, and '2' for combined: ")
+    # comprehensive optimal configuration finder loop
+    batch_sizes = list(range(5, 30, 5))
+    epochs = list(range(20, 30, 5))
+    learning_rates = [0.001, 0.005, 0.01, 0.015]
+    random_seeds = [2, 4, 6, 9, 42, 109]
+    models = ['n', 'p', 'c']
 
-    lowest_test_loss = np.inf
-    lowest_test_loss_hyperparams = []
-    best_test_loss_imp = -np.inf
-    best_test_loss_imp_hyperparams = []
+    print(f"testing the following: \n",
+        f"- {batch_sizes=}\n", 
+        f"- {epochs=}\n", 
+        f"- {learning_rates=}\n", 
+        f"- {random_seeds=}\n"
+        f"- {models=}")
 
-    print("\n====TRAINING====")
+    # one cell for each configuration, allowing me to do calculations with everything later
+    # each cell's entries are averaged across random seeds, so there's no dimension for random seeds
+    results_tensor = torch.full(
+        (
+        len(models),
+        len(epochs), 
+        len(learning_rates), 
+        len(batch_sizes), 
+        4, # output of train will include 4 items (which will each get their own slot in the tensor): losses, test_losses, avg_loss_improvement, avg_test_loss_improvement
+        max(epochs) # greatest number of epochs - for losses and test losses, slots that aren't used will be NaN, all slots will have the same avg loss improvement and avg test loss improvement
+        ), torch.nan
+    )
 
-    all_results = []
-    with tqdm(total=len(batch_sizes)*len(epochs)*len(learning_rates)) as pbar:
-        for batch_size in batch_sizes: 
-            for epoch_n in epochs: 
-                for learning_rate in learning_rates: 
-                    # I only want to look at the average test loss and improvement across multiple random seeds so things are standardized rather than thinking one model is better because it performed better on a certain random seed
-                    all_test_losses_each_epoch = []
-                    all_test_loss_improvements = []
-                    avg_test_losses_each_epoch = [] # calculate using the above once loop is over
-                    avg_test_loss_improvement = np.inf
+    print(f"Training: ")
+    with tqdm(total=len(models)*len(epochs)*len(learning_rates)*len(batch_sizes)) as pbar: 
+        for m, model in enumerate(models): 
+            for e, epoch in enumerate(epochs): 
+                for l, lr in enumerate(learning_rates): 
+                    for b, batch_size in enumerate(batch_sizes): 
+                        # each component of out will be averaged across random seeds and then inserted into the proper place of the results tensor
+                        avg_loss = None
+                        avg_test_loss = None
+                        avg_loss_improvement = 0
+                        avg_test_loss_improvement = 0
 
-                    for random_seed in random_seeds: 
-                        if model_n == 'n': 
-                            model = NeuralNet(16)
-                            out = train_nn(model, ni_train, avg_decisions_train, ni_val, avg_decisions_val, n_epoch=epoch_n, n_batch_size=batch_size, learning_rate=learning_rate, random_seed=random_seed)
-                        elif model_n == 'p': 
-                            model = NeuralNet(40)
-                            out = train_nn(model, pp01_train, avg_decisions_train, pp01_val, avg_decisions_val, n_epoch=epoch_n, n_batch_size=batch_size, learning_rate=learning_rate, random_seed=random_seed)
-                        elif model_n == '2': # model_n == '2'
-                            model = NeuralNet(16+40)
-                            out = train_nn(model, combined_train, avg_decisions_train, combined_val, avg_decisions_val, n_epoch=epoch_n, n_batch_size=batch_size, learning_rate=learning_rate, random_seed=random_seed)
+                        for rs in random_seeds: 
+                            out = train_model(model, epoch, batch_size, lr, report_every, False, rs)
+                            if avg_loss == None: 
+                                avg_loss = [0] * len(out['losses'])
+                                avg_test_loss = [0] * len(out['test_losses'])
+                            for i, loss in enumerate(out['losses']): avg_loss[i] += loss
+                            for i, test_loss in enumerate(out['test_losses']): avg_test_loss[i] += test_loss
+                            avg_loss_improvement += out['avg_loss_improvement']
+                            avg_test_loss_improvement += out['avg_test_loss_improvement']
 
-                        losses = out['test_losses']
-                        all_test_losses_each_epoch.append(losses)
-                        all_test_loss_improvements.append(out['avg_test_loss_improvement'])
+                        avg_loss = [loss / len(random_seeds) for loss in avg_loss]
+                        avg_test_loss = [test_loss / len(random_seeds) for test_loss in avg_test_loss]
+                        avg_loss_improvement /= len(random_seeds)
+                        avg_test_loss_improvement /= len(random_seeds)
+                        
+                        # see comments in results_tensor to understand what's happening here
+                        for i, item in enumerate(avg_loss): 
+                            results_tensor[m, e, l, b, 0, i] = avg_loss[i]
 
-                    for epoch in range(epoch_n//5): 
-                        all_losses_this_epoch = [all_test_losses_each_epoch[i][epoch] for i in range(len(all_test_losses_each_epoch))]
-                        avg_test_loss_this_epoch = np.mean(all_losses_this_epoch)
-                        avg_test_losses_each_epoch.append(avg_test_loss_this_epoch)
-                    
-                    avg_test_loss_improvement = np.mean(all_test_loss_improvements)
-                    
-                    result_dict = {'epoch_avg_losses': avg_test_losses_each_epoch, 'avg_test_loss_improvement': avg_test_loss_improvement, 'batch_size': batch_size, 'total_epoch_n': epoch_n,'learning_rate': learning_rate, 'best_loss_occurred_at_epoch': ((avg_test_losses_each_epoch.index(min(avg_test_losses_each_epoch))+1)*5)}
-                    if min(avg_test_losses_each_epoch) < lowest_test_loss: 
-                        lowest_test_loss = min(avg_test_losses_each_epoch)
-                        lowest_test_loss_hyperparams = result_dict
-                    if avg_test_loss_improvement < best_test_loss_imp: 
-                        best_test_loss_imp = avg_test_loss_improvement
-                        best_test_loss_imp_hyperparams = result_dict
-                    
-                    all_results.append(result_dict)
-                    pbar.update(1)
-                    print("\n\n")
+                        for i, item in enumerate(avg_test_loss): 
+                            results_tensor[m, e, l, b, 1, (i+1)*report_every - 1] = avg_test_loss[i] # this is the indexing that worked, but I'm not really sure what's going on here - will have to trace later
+                        
+                        results_tensor[m, e, l, b, 2, :] = avg_loss_improvement
+                        results_tensor[m, e, l, b, 3, :] = avg_test_loss_improvement
+
+                        pbar.update(1)
+
+        # results/calculations: 
+        # dim 1 = models, dim 2 = epochs, dim 3 = learning rates, dim 4 = batch sizes, dim 5 = output types, dim 6 = epoch numbers those outputs occur at
+
+        five_lowest_test_losses = [np.inf, np.inf, np.inf, np.inf, np.inf]
+        five_lowest_test_loss_hyperparams = [{}, {}, {}, {}, {}]
+
+        five_best_test_loss_improvements = [np.inf, np.inf, np.inf, np.inf, np.inf]
+        five_best_test_loss_improvements_hyperparams = [{}, {}, {}, {}, {}]
+
+        for m, model in enumerate(models): 
+            for e, epoch in enumerate(epochs): 
+                for l, lr in enumerate(learning_rates): 
+                    for b, batch_size in enumerate(batch_sizes): 
+                        out = results_tensor[m, e, l, b, :]
+                        for i, loss in enumerate(out[1]): 
+                            if not torch.isnan(loss) and loss < max(five_lowest_test_losses): 
+                                max_index = np.argmax(five_lowest_test_losses)
+                                five_lowest_test_losses[max_index] = loss.item()
+                                five_lowest_test_loss_hyperparams[max_index] = {
+                                    'model': model, 
+                                    'num_epochs': epoch, 
+                                    'learning_rate': lr, 
+                                    'batch_size': batch_size, 
+                                    'occured_at_epoch': i+1
+                                }
+                        if out[3][0].item() < max(five_best_test_loss_improvements): # homogenous throughout, doesn't matter what I choose
+                            max_index = np.argmax(five_best_test_loss_improvements)
+                            five_best_test_loss_improvements[max_index] = out[3][0].item()
+                            five_best_test_loss_improvements_hyperparams[max_index] = {
+                                    'model': model, 
+                                    'num_epochs': epoch, 
+                                    'learning_rate': lr, 
+                                    'batch_size': batch_size
+                                }
     
-    print("\n====REPORT====")
+        # ordering for reporting: 
+        order_1 = np.argsort(five_lowest_test_losses)
+        five_lowest_test_losses = np.array(five_lowest_test_losses)[order_1].tolist()
+        five_lowest_test_loss_hyperparams = np.array(five_lowest_test_loss_hyperparams)[order_1].tolist()
 
-    print(f"Best test loss: {lowest_test_loss}")
-    print(f"Hyperparams: ")
-    display_results(lowest_test_loss_hyperparams)
-    print("")
-    
-    print(f"Best test loss improvement: {best_test_loss_imp}")
-    print(f"Hyperparams: ")
-    display_results(best_test_loss_imp_hyperparams)
+        order_2 = np.argsort(five_best_test_loss_improvements)
+        five_best_test_loss_improvements = np.array(five_best_test_loss_improvements)[order_2].tolist()
+        five_best_test_loss_improvements_hyperparams = np.array(five_best_test_loss_improvements_hyperparams)[order_2].tolist()
+
+        print("\nReport: ")
+
+        for i in range(5):
+            print(f"\n{i+1} lowest validation loss:")
+            print(f"Loss: {five_lowest_test_losses[i]}")
+            print(five_lowest_test_loss_hyperparams[i])
+
+        for i in range(5): 
+            print(f"\n{i+1} best loss improvement:")
+            print(f"Improvement: {five_best_test_loss_improvements[i]}")
+            print(five_best_test_loss_improvements_hyperparams[i])
+
+        print("\n==== FOR COMPARISON ====")
+        get_avg_baseline(avg_decisions_train, avg_decisions_val)
 
 
-print("\n====FOR COMPARISON====")
-get_avg_baseline(avg_decisions_train, avg_decisions_val)
+    print("\n====FOR COMPARISON====")
+    get_avg_baseline(avg_decisions_train, avg_decisions_val)

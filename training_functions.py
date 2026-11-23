@@ -5,7 +5,7 @@ import random
 import numpy as np
 from scipy.stats import linregress # https://stackoverflow.com/questions/9538525/calculating-slopes-in-numpy-or-scipy
 
-def train_nn(nn, input_data=[], targets=[], test_data=[], test_targets=[], n_epoch=40, n_batch_size=10, report_every=5, learning_rate=0.001, criterion=nn.MSELoss(), random_seed=None): # seed is for batching
+def train_nn(nn, input_data=[], targets=[], test_data=[], test_targets=[], n_epoch=40, n_batch_size=10, report_every=5, learning_rate=0.001, criterion=nn.MSELoss(), random_seed=None, with_print=True): # seed is for batching
     random.seed(random_seed) # for batching
     current_loss = 0
     all_losses = []
@@ -13,7 +13,7 @@ def train_nn(nn, input_data=[], targets=[], test_data=[], test_targets=[], n_epo
     nn.train()
     optimizer = torch.optim.Adam(nn.parameters(), lr=learning_rate)
 
-    print(f"Training on dataset with n={len(input_data)}, dims={(np.asarray(input_data)).shape}")
+    if with_print: print(f"Training on dataset with n={len(input_data)}, dims={(np.asarray(input_data)).shape}")
     
     for k in range(1, n_epoch + 1): 
         nn.train()
@@ -67,11 +67,11 @@ def train_nn(nn, input_data=[], targets=[], test_data=[], test_targets=[], n_epo
                 epoch_test_loss = float(np.mean(test_batch_losses))
                 all_test_losses.append(epoch_test_loss) 
                 
-            print(f"{k} ({k / n_epoch:.3f}): \t average batch loss = {all_losses[-1]:.5f} \t average batch test loss = {all_test_losses[-1]:.5f}")
+            if with_print: print(f"{k} ({k / n_epoch:.3f}): \t average batch loss = {all_losses[-1]:.5f} \t average batch test loss = {all_test_losses[-1]:.5f}")
 
         current_loss = 0
 
-    print(f"done training,\t avg improvement in losses: {linregress(list(range(len(all_losses))), all_losses).slope:.4f} \t avg improvement in test losses: {linregress(list(range(len(all_test_losses))), all_test_losses).slope:.4f}")
+    if with_print: print(f"done training,\t avg improvement in losses: {linregress(list(range(len(all_losses))), all_losses).slope:.4f} \t avg improvement in test losses: {linregress(list(range(len(all_test_losses))), all_test_losses).slope:.4f}")
     return {
         'losses': all_losses, 
         'test_losses': all_test_losses, 

@@ -14,9 +14,11 @@ pcrnn = PredictiveCodingRNN(29, [2, 10, 5], 1) # 2 is input, 10 is 1st latent st
 df = pd.read_csv("data_with_computer_decisions.csv")
 player_decision_cols = cols_btw('G101', 'G130')
 player_decisions = df[player_decision_cols]
+player_decisions -= 1 # want decisions represented as 0 or 1, not 1 or 2
 
 computer_decision_cols = cols_btw('CD_01', 'CD_30')
 computer_decisions = df[computer_decision_cols]
+computer_decisions -= 1 # want decisions represented as 0 or 1, not 1 or 2
 
 player_decision_tensors = []
 for i in range(len(player_decisions)): 
@@ -42,35 +44,50 @@ all_trains, all_vals, all_tests = split_into_train_val_test((computer_decision_t
 # - 2nd dimension (list of tensors) are scenarios (these comprise batches)
 # - 3rd dimension (tensors) are sequences of decisions
 
-# first, I need to stack pd and cd separately into their own tensors
-all_trains = [torch.stack(decision_type) for decision_type in all_trains]
-
-# next, combine cd and pd into tensor dimensions
-all_trains = torch.stack(all_trains).float() # so its the right type for the rnn
-
-print(f"{all_trains.shape=}")
-
 # TODO: I couldn't find one of the printed decision series in the data. I need to figure out what caused that/what's going on
 # NOTE: the paper doesn't clarify who made the first move. I'm assuming the player, but I know this could be wrong since I'm making an assumption
 
 # x_batch (and therefore also all_trains) needs to have the format: d1 is step, d2 is sequence of timesteps, d3 is player decision + computer decision
-all_trains = all_trains.permute(2,1,0)
 
-print(f"{all_trains.shape=}")
+def split_segments_to_tensor_pcrnn_format(split_segment): 
+    # first, I need to stack pd and cd separately into their own tensors
+    result = [torch.stack(decision_type) for decision_type in split_segment]
+    # next, combine cd and pd into tensor dimensions
+    result = torch.stack(result).float() # so its the right type for the rnn
+     # x_batch (and therefore also all_trains) needs to have the format: d1 is step, d2 is sequence of timesteps, d3 is player decision + computer decision
+    result = result.permute(2, 1, 0)
+    return result
 
-x_batches = [all_trains[:-1, i:i+batch_size, :] for i in range(0, all_trains.shape[1], batch_size)] # purposefully doesn't include the last decision
-# TODO: remove computer decision from y_batches
-y_batches = [all_trains[1:, i:i+batch_size, 1:] for i in range(0, all_trains.shape[1], batch_size)] # purposefully doesn't include the first decision or computer decisions (only player decisions)
+all_trains = split_segments_to_tensor_pcrnn_format(all_trains)
+all_vals = split_segments_to_tensor_pcrnn_format(all_vals)
+all_tests = split_segments_to_tensor_pcrnn_format(all_tests)
 
+def get_x_y_batches(data, b): # b is batch size
+    x_batches = [data[:-1, i:i+b, :] for i in range(0, data.shape[1], b)] # purposefully doesn't include the last decision
+    y_batches = [data[1:, i:i+b, 1:] for i in range(0, data.shape[1], b)] # purposefully doesn't include the first decision or computer decisions (only player decisions)
+    return x_batches, y_batches
 
-def train(pcrnn, n_epochs, x_batches, y_batches, eta_infer, eta_learn, T_infer): 
+train_x, train_y = get_x_y_batches(all_trains, batch_size)
+val_x, val_y = get_x_y_batches(all_vals, batch_size)
+
+train_mean = torch.cat([y.flatten() for y in train_y]).mean()
+val_targets = torch.cat([y.flatten() for y in val_y])
+baseline_loss = torch.mean(torch.abs(val_targets - train_mean))
+print("Training mean baseline:", train_mean.item())
+print("Baseline validation loss:", baseline_loss.item())
+
+def train(pcrnn, n_epochs, x_batches, y_batches, x_val, y_val, eta_infer, eta_learn, T_infer): 
     pcrnn.train()
     error_history, gm_error_history = {'infer': [], 'learn': []}, {'infer': [], 'learn': []}
+    overall_val_errors, all_accuracies = [], []
+    all_supervised_errors = []
 
     for epoch in range(n_epochs): 
-        print(f"Epoch {epoch+1} / {n_epochs}")
+        # print(f"Epoch {epoch+1} / {n_epochs}")
         ep_e_infer, ep_gme_infer, ep_e_learn, ep_gme_learn = [], [], [], []
 
+
+        # training
         for x_batch, y_batch in zip(x_batches, y_batches): 
             # print(f"{x_batch=}, {y_batch=}")
             e_latents, gme_latents, e_learn, gme_learn = pcrnn.forward_train(x_batch, y_batch, T_infer, eta_infer, eta_learn)
@@ -85,23 +102,51 @@ def train(pcrnn, n_epochs, x_batches, y_batches, eta_infer, eta_learn, T_infer):
         error_history['learn'].append(np.mean(ep_e_learn))
         gm_error_history['learn'].append(np.mean(ep_gme_learn))
 
-        '''
-        avg_e_infer = np.mean(ep_e_infer)
-        avg_gme_infer = np.mean(ep_gme_infer)
-        avg_e_learn = np.mean(ep_e_learn)
-        avg_gme_learn = np.mean(ep_gme_learn)
-        '''
+        # testing
+        all_val_preds = []
+        all_val_targets = []
 
-        print(f"Epoch {epoch+1} / {n_epochs}, avg infer error: {np.mean(ep_e_infer):.5}, avg gme infer: {np.mean(ep_gme_infer):.5}, avg error learn: {np.mean(ep_e_learn):.5}, avg gme learn: {np.mean(ep_gme_learn):.5}")
+        for x_val_batch, y_val_batch in zip(x_val, y_val): 
+            y_hat_batch = pcrnn.forward_test(x_val_batch, T_infer, eta_infer)
+            y_hat_batch = torch.stack(y_hat_batch)
+
+            all_val_preds.append(y_hat_batch)
+            all_val_targets.append(y_val_batch)
+
+            # print("Prediction min/max:",
+            # y_hat_batch.min().item(), y_hat_batch.max().item())
+
+            # print("Prediction mean:", y_hat_batch.mean().item())
+            # print("Actual mean:", y_val_batch.mean().item())
+
+        all_val_preds = torch.cat(all_val_preds, dim=1) # along columns, so they each become their own column
+        all_val_targets = torch.cat(all_val_targets, dim=1) # also along columns
+
+        val_losses = torch.abs(all_val_targets - all_val_preds)
+        avg_val_loss = torch.mean(val_losses).item()
+        overall_val_errors.append(avg_val_loss)
+
+        binary_preds = (all_val_preds >= 0.5).float()
+
+        accuracy = (binary_preds == all_val_targets).float().mean().item() # .float converts from bool to numerical value, which is then averaged with mean and the value is taken with .item
+        print(f"{accuracy=}")
+        all_accuracies.append(accuracy)
+
+        print(f"Epoch {epoch+1} / {n_epochs}. VAL: val loss: {avg_val_loss:.5}, val accuracy: {accuracy}; TRAIN: avg infer error: {np.mean(ep_e_infer):.5}, avg gme infer: {np.mean(ep_gme_infer):.5}, avg error learn: {np.mean(ep_e_learn):.5}, avg gme learn: {np.mean(ep_gme_learn):.5}")
+        print("----------------------------------------------------------------------------------------------------------------------------------")
     
-    return error_history, gm_error_history
+    return error_history, gm_error_history, overall_val_errors, all_accuracies
 
-e_hist, gme_hist = train(pcrnn, 20, x_batches, y_batches, 0.01, 0.0001, 5)
+n_epochs = 50
+T_infer = 20
+eta_infer = 0.001
+eta_learn = 0.0001
 
-# print(f"{e_hist=}, {gme_hist=}")
+e_hist, gme_hist, val_errors, accuracies = train(pcrnn, n_epochs, train_x, train_y, val_x, val_y, eta_infer, eta_learn, T_infer)
 
+# chart code written by ChatGPT (very repetitive, didn't want to spend time on it)
 epochs = range(1, len(e_hist['infer'])+1)
-fig, axes = plt.subplots(2, 2, figsize=(12, 8))
+fig, axes = plt.subplots(3, 2, figsize=(12, 8))
 
 # Inference error
 axes[0, 0].plot(epochs, e_hist['infer'], marker='o')
@@ -130,6 +175,20 @@ axes[1, 1].set_title("GME Error History (Learn)")
 axes[1, 1].set_xlabel("Epoch")
 axes[1, 1].set_ylabel("GME Error")
 axes[1, 1].grid(True)
+
+# Validation Error
+axes[2, 0].plot(epochs, val_errors, marker='o')
+axes[2, 0].set_title("Validation Errors")
+axes[2, 0].set_xlabel("Epoch")
+axes[2, 0].set_ylabel("Error")
+axes[2, 0].grid(True)
+
+# Validation Accuracy
+axes[2, 1].plot(epochs, accuracies, marker='o')
+axes[2, 1].set_title("Validation Accuracies")
+axes[2, 1].set_xlabel("Epoch")
+axes[2, 1].set_ylabel("Accuracy")
+axes[2, 1].grid(True)
 
 plt.tight_layout()
 plt.show()
