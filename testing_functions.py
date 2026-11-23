@@ -23,8 +23,8 @@ def get_majority_baseline(input_data):
 
 # also written by ChatGPT
 def get_avg_baseline(train_targets, val_targets):
-    train_targets = torch.as_tensor(train_targets, dtype=torch.float32)
-    val_targets = torch.as_tensor(val_targets, dtype=torch.float32)
+    train_targets = torch.as_tensor(train_targets, dtype=torch.float32)-1
+    val_targets = torch.as_tensor(val_targets, dtype=torch.float32)-1
 
     baseline_pred = train_targets.mean()
     baseline_mse = ((val_targets - baseline_pred) ** 2).mean()

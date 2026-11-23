@@ -67,9 +67,9 @@ loop = input("Full loop (l) or defined config (d): ")
 
 if loop == 'd': 
     model_input = input("NI, PP01, or combined? (n, p, c): ")
-    batch_size = int(input("Batch size (must be an integer): "))
     epochs = int(input("Number of epochs (must be an integer): "))
     learning_rate = float(input("Learning rate (must be a float): "))
+    batch_size = int(input("Batch size (must be an integer): "))
     report_every = int(input("Report every X epochs (must be an integer): "))
 
     if model_input not in ['n', 'p', 'c']: 
@@ -79,9 +79,9 @@ if loop == 'd':
         display_results(out, report_every, True) # want to see plots
 else: 
     # comprehensive optimal configuration finder loop
-    batch_sizes = list(range(5, 30, 5))
-    epochs = list(range(20, 30, 5))
-    learning_rates = [0.001, 0.005, 0.01, 0.015]
+    epochs = list(range(0, 15, 2))
+    learning_rates = [0.0005, 0.001, 0.005, 0.01]
+    batch_sizes = list(range(1, 15, 3))
     random_seeds = [2, 4, 6, 9, 42, 109]
     models = ['n', 'p', 'c']
 
@@ -118,6 +118,7 @@ else:
                         avg_test_loss_improvement = 0
 
                         for rs in random_seeds: 
+                            # function will automatically create a new neural net each time
                             out = train_model(model, epoch, batch_size, lr, report_every, False, rs)
                             if avg_loss == None: 
                                 avg_loss = [0] * len(out['losses'])
@@ -137,7 +138,7 @@ else:
                             results_tensor[m, e, l, b, 0, i] = avg_loss[i]
 
                         for i, item in enumerate(avg_test_loss): 
-                            results_tensor[m, e, l, b, 1, (i+1)*report_every - 1] = avg_test_loss[i] # this is the indexing that worked, but I'm not really sure what's going on here - will have to trace later
+                            results_tensor[m, e, l, b, 1, (i+1)*report_every - 1] = avg_test_loss[i] # tensor indexing is based on 0, and I want the losses placed at their epochs so I don't have to calculate the epochs later
                         
                         results_tensor[m, e, l, b, 2, :] = avg_loss_improvement
                         results_tensor[m, e, l, b, 3, :] = avg_test_loss_improvement
@@ -199,10 +200,6 @@ else:
             print(f"\n{i+1} best loss improvement:")
             print(f"Improvement: {five_best_test_loss_improvements[i]}")
             print(five_best_test_loss_improvements_hyperparams[i])
-
-        print("\n==== FOR COMPARISON ====")
-        get_avg_baseline(avg_decisions_train, avg_decisions_val)
-
 
     print("\n====FOR COMPARISON====")
     get_avg_baseline(avg_decisions_train, avg_decisions_val)
