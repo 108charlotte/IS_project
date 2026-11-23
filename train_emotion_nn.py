@@ -53,7 +53,7 @@ for index, row in df.iterrows():
         participant_ids.append(df.loc[index, 'ID'])
 
 # https://scikit-learn.org/stable/modules/generated/sklearn.model_selection.GroupShuffleSplit.html
-splitter_1 = GroupShuffleSplit(n_splits=1, test_size=0.2) # TODO: potentially add a random state here
+splitter_1 = GroupShuffleSplit(n_splits=1, test_size=0.3) # TODO: potentially add a random state here
 splitter_2 = GroupShuffleSplit(n_splits=1, test_size=0.5)
 
 # only one fold (for now): just use next(): https://stackoverflow.com/questions/68152473/python-split-to-train-test-val-using-groupshufflesplit
@@ -89,9 +89,9 @@ if loop == 'd':
     display_results(out, report_every, charts=True, accuracy=True) # want to see plots and display accuracy
 else: 
     # comprehensive optimal configuration finder loop
-    epochs = list(range(5, 20, 2))
-    learning_rates = [0.001, 0.005, 0.01, 0.015]
-    batch_sizes = list(range(5, 30, 5))
+    epochs = list(range(260, 460, 20))
+    learning_rates = [0.0005, 0.001, 0.005, 0.01]
+    batch_sizes = list(range(5, 25, 3))
     random_seeds = [2, 4, 6, 9, 42, 109]
 
     print(f"testing the following: \n",
