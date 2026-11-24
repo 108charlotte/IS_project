@@ -19,6 +19,7 @@ class NeuralNet(nn.Module):
         result = self.layer_2(self.layer_1(x))
         return result
 
+
 class RNN(nn.Module): 
     def __init__(self, inp, l_1, out): 
         super(RNN, self).__init__()

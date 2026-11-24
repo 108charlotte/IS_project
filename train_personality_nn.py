@@ -36,21 +36,21 @@ for i in range(len(player_decisions)):
     avg_decisions.append(torch.tensor(np.mean(player_decisions.iloc[i, :])))
 # something to look into: does personality play a bigger impact at certain moments, ex. the beginning or middle of a game? 
 
-ni_train, ni_val_test, pp01_train, pp01_val_test, avg_decisions_train, avg_decisions_val_test = train_test_split(ni_tensors,pp01_tensors, avg_decisions, test_size=0.2, train_size=0.8)
-ni_val, ni_test, pp01_val, pp01_test, avg_decisions_val, avg_decisions_test = train_test_split(ni_val_test, pp01_val_test, avg_decisions_val_test, test_size=0.5, train_size=0.5)
-
-# for nn_2channel
-ni_train_tensor = torch.stack(ni_train) # now a 2D tensor
-pp01_train_tensor = torch.stack(pp01_train)
-combined_train = torch.cat((ni_train_tensor, pp01_train_tensor), dim=1)
-
-ni_val_tensor = torch.stack(ni_val)
-pp01_val_tensor = torch.stack(pp01_val)
-combined_val = torch.cat((ni_val_tensor, pp01_val_tensor), dim=1)
-
 report_every = 5
 
 def train_model(character_identifier, epochs, batch_size, lr, report_every, with_print, random_seed=None): 
+    ni_train, ni_val_test, pp01_train, pp01_val_test, avg_decisions_train, avg_decisions_val_test = train_test_split(ni_tensors,pp01_tensors, avg_decisions, test_size=0.3, train_size=0.7, random_state=random_seed)
+    ni_val, ni_test, pp01_val, pp01_test, avg_decisions_val, avg_decisions_test = train_test_split(ni_val_test, pp01_val_test, avg_decisions_val_test, test_size=0.5, train_size=0.5, random_state=random_seed)
+
+    # for nn_2channel
+    ni_train_tensor = torch.stack(ni_train) # now a 2D tensor
+    pp01_train_tensor = torch.stack(pp01_train)
+    combined_train = torch.cat((ni_train_tensor, pp01_train_tensor), dim=1)
+
+    ni_val_tensor = torch.stack(ni_val)
+    pp01_val_tensor = torch.stack(pp01_val)
+    combined_val = torch.cat((ni_val_tensor, pp01_val_tensor), dim=1)
+
     match character_identifier: 
         case 'n': 
             out = train_nn(NeuralNet(16), ni_train, avg_decisions_train, ni_val, avg_decisions_val, n_epoch=epochs, n_batch_size=batch_size, learning_rate=lr, random_seed=random_seed, report_every=report_every, with_print=with_print)
@@ -61,7 +61,9 @@ def train_model(character_identifier, epochs, batch_size, lr, report_every, with
         case _: 
             print(f"INVALID MODEL CHARACTER IDENTIFIER")
             out = {}
-    return out
+
+    return out, get_avg_baseline(avg_decisions_train, avg_decisions_val)
+
 
 loop = input("Full loop (l) or defined config (d): ")
 
@@ -75,7 +77,8 @@ if loop == 'd':
     if model_input not in ['n', 'p', 'c']: 
         print("Invalid model type. Please enter n, p, or c")
     else: 
-        out = train_model(model_input, epochs, batch_size, learning_rate, report_every, True)
+        out, baseline = train_model(model_input, epochs, batch_size, learning_rate, report_every, True)
+        print(f"Baseline validation MSE: {baseline}")
         display_results(out, report_every, True) # want to see plots
 else: 
     # comprehensive optimal configuration finder loop
@@ -100,7 +103,7 @@ else:
         len(epochs), 
         len(learning_rates), 
         len(batch_sizes), 
-        4, # output of train will include 4 items (which will each get their own slot in the tensor): losses, test_losses, avg_loss_improvement, avg_test_loss_improvement
+        5, # output of train will include 4 items (which will each get their own slot in the tensor): losses, test_losses, avg_loss_improvement, avg_test_loss_improvement + baseline results
         max(epochs) # greatest number of epochs - for losses and test losses, slots that aren't used will be NaN, all slots will have the same avg loss improvement and avg test loss improvement
         ), torch.nan
     )
@@ -116,10 +119,11 @@ else:
                         avg_test_loss = None
                         avg_loss_improvement = 0
                         avg_test_loss_improvement = 0
+                        avg_baseline = 0
 
                         for rs in random_seeds: 
                             # function will automatically create a new neural net each time
-                            out = train_model(model, epoch, batch_size, lr, report_every, False, rs)
+                            out, baseline = train_model(model, epoch, batch_size, lr, report_every, False, rs)
                             if avg_loss == None: 
                                 avg_loss = [0] * len(out['losses'])
                                 avg_test_loss = [0] * len(out['test_losses'])
@@ -127,11 +131,13 @@ else:
                             for i, test_loss in enumerate(out['test_losses']): avg_test_loss[i] += test_loss
                             avg_loss_improvement += out['avg_loss_improvement']
                             avg_test_loss_improvement += out['avg_test_loss_improvement']
+                            avg_baseline += baseline
 
                         avg_loss = [loss / len(random_seeds) for loss in avg_loss]
                         avg_test_loss = [test_loss / len(random_seeds) for test_loss in avg_test_loss]
                         avg_loss_improvement /= len(random_seeds)
                         avg_test_loss_improvement /= len(random_seeds)
+                        avg_baseline /= len(random_seeds)
                         
                         # see comments in results_tensor to understand what's happening here
                         for i, item in enumerate(avg_loss): 
@@ -142,6 +148,7 @@ else:
                         
                         results_tensor[m, e, l, b, 2, :] = avg_loss_improvement
                         results_tensor[m, e, l, b, 3, :] = avg_test_loss_improvement
+                        results_tensor[m, e, l, b, 4, :] = avg_baseline
 
                         pbar.update(1)
 
@@ -168,7 +175,8 @@ else:
                                     'num_epochs': epoch, 
                                     'learning_rate': lr, 
                                     'batch_size': batch_size, 
-                                    'occured_at_epoch': i+1
+                                    'occured_at_epoch': i+1, 
+                                    'baseline': out[4, 0].item()
                                 }
                         if out[3][0].item() < max(five_best_test_loss_improvements): # homogenous throughout, doesn't matter what I choose
                             max_index = np.argmax(five_best_test_loss_improvements)
@@ -177,7 +185,7 @@ else:
                                     'model': model, 
                                     'num_epochs': epoch, 
                                     'learning_rate': lr, 
-                                    'batch_size': batch_size
+                                    'batch_size': batch_size, 
                                 }
     
         # ordering for reporting: 
@@ -193,13 +201,10 @@ else:
 
         for i in range(5):
             print(f"\n{i+1} lowest validation loss:")
-            print(f"Loss: {five_lowest_test_losses[i]}")
+            print(f"Loss: {five_lowest_test_losses[i]:.7} vs baseline: {five_lowest_test_loss_hyperparams[i]['baseline']:.7}")
             print(five_lowest_test_loss_hyperparams[i])
 
         for i in range(5): 
             print(f"\n{i+1} best loss improvement:")
             print(f"Improvement: {five_best_test_loss_improvements[i]}")
             print(five_best_test_loss_improvements_hyperparams[i])
-
-    print("\n====FOR COMPARISON====")
-    get_avg_baseline(avg_decisions_train, avg_decisions_val)
