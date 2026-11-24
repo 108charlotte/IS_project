@@ -14,7 +14,7 @@ def get_majority_baseline(train_targets, val_targets):
     # Calculate validation MSE
     mse = torch.mean((val_targets - predictions) ** 2)
 
-    return mse.item()
+    return float(mse.item())
 
 # also written by ChatGPT - basically, if you use the average of the training targets to predict validation labels, this is what you would get
 def get_avg_baseline(train_targets, val_targets):
@@ -25,4 +25,4 @@ def get_avg_baseline(train_targets, val_targets):
     baseline_mse = ((val_targets - baseline_pred) ** 2).mean()
 
     # print("Baseline validation MSE:", baseline_mse.item())
-    return baseline_mse.item()
+    return float(baseline_mse.item())

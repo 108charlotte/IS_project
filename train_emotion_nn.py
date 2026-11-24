@@ -81,25 +81,37 @@ loop = input("Full loop (l) or defined config (d): ")
 report_every = int(input("Report every X epochs (must be an integer): "))
 
 if loop == 'd': 
-    nn = NeuralNet(20)
-
+    num_times = int(input("How many times do you want to run this model? "))
     epochs = int(input("Number of epochs (must be an integer): "))
     learning_rate = float(input("Learning rate (must be a float): "))
     batch_size = int(input("Batch size (must be an integer): "))
 
-    out, avg_b, maj_b = train_emotion_nn(epochs, batch_size, learning_rate, report_every, True)
-    print(f"Lowest loss: {min(out['losses']):.7} vs avg baseline: {avg_b:.7} vs majority baseline: {maj_b:.7}")
-    display_results(out, report_every, charts=True, accuracy=True) # want to see plots and display accuracy
+    all_outs = []
+    all_avg_bs = []
+    all_maj_bs = []
+    for _ in range(num_times): 
+        out, avg_b, maj_b = train_emotion_nn(epochs, batch_size, learning_rate, report_every, True)
+        all_outs.append(out)
+        all_avg_bs.append(avg_b)
+        all_maj_bs.append(maj_b)
+
+    # avg all lowest losses
+    lowest_avg = 0
+    for out in all_outs: 
+        lowest_avg += min(out['losses'])
+    lowest_avg /= len(all_outs)
+    print(f"Lowest loss: {lowest_avg:.7} vs avg baseline: {np.mean(all_avg_bs):.7} vs majority baseline: {np.mean(all_avg_bs):.7}")
+    display_results(all_outs, report_every, charts=True, accuracy=True, multiple=True) # want to see plots and display accuracy
 else: 
     # comprehensive optimal configuration finder loop
-    epochs = list(range(260, 460, 20))
-    learning_rates = [0.0005, 0.001, 0.005, 0.01]
+    epochs = list(range(5, 50, 5))
+    learning_rates = [0.0005, 0.001, 0.005, 0.01, 0.05]
     batch_sizes = list(range(5, 25, 3))
     random_seeds = [2, 4, 6, 9, 42, 109]
 
     print(f"testing the following: \n",
-        f"- {batch_sizes=}\n", 
         f"- {epochs=}\n", 
+        f"- {batch_sizes=}\n", 
         f"- {learning_rates=}\n", 
         f"- {random_seeds=}\n"
         )

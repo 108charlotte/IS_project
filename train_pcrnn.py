@@ -6,7 +6,7 @@ from sklearn.model_selection import train_test_split
 import matplotlib.pyplot as plt
 import numpy as np
 
-batch_size = 5
+batch_size = 5 # needed for splitting data
 # TODO: confirm that dimensions are all correct
 pcrnn = PredictiveCodingRNN(29, [2, 10, 5], 1) # 2 is input, 10 is 1st latent state, 5 is next latent state, 1 is output
 
@@ -28,11 +28,11 @@ computer_decision_tensors = []
 for i in range(len(computer_decisions)): 
     computer_decision_tensors.append(torch.tensor(computer_decisions.iloc[i].values))
 
-def split_into_train_val_test(to_split, test_size=0.1, val_size=0.1): # pass in an list of lists
-    split_data = train_test_split(*to_split, test_size=test_size+val_size)
+def split_into_train_val_test(to_split, test_size=0.1, val_size=0.1, random_seed=None): # pass in an list of lists
+    split_data = train_test_split(*to_split, test_size=test_size+val_size, random_state=random_seed)
     train = split_data[::2]
     test_val = split_data[1::2]
-    split_test_val = train_test_split(*test_val, test_size=test_size/(test_size + val_size))
+    split_test_val = train_test_split(*test_val, test_size=test_size/(test_size + val_size), random_state=random_seed)
     val = split_test_val[::2]
     test = split_test_val[1::2]
     return train, val, test
@@ -76,11 +76,10 @@ baseline_loss = torch.mean(torch.abs(val_targets - train_mean))
 print("Training mean baseline:", train_mean.item())
 print("Baseline validation loss:", baseline_loss.item())
 
-def train(pcrnn, n_epochs, x_batches, y_batches, x_val, y_val, eta_infer, eta_learn, T_infer): 
+def train(pcrnn, n_epochs, x_batches, y_batches, x_val, y_val, eta_infer, eta_learn, T_infer, with_print=True): 
     pcrnn.train()
     error_history, gm_error_history = {'infer': [], 'learn': []}, {'infer': [], 'learn': []}
     overall_val_errors, all_accuracies = [], []
-    all_supervised_errors = []
 
     for epoch in range(n_epochs): 
         # print(f"Epoch {epoch+1} / {n_epochs}")
@@ -113,12 +112,6 @@ def train(pcrnn, n_epochs, x_batches, y_batches, x_val, y_val, eta_infer, eta_le
             all_val_preds.append(y_hat_batch)
             all_val_targets.append(y_val_batch)
 
-            # print("Prediction min/max:",
-            # y_hat_batch.min().item(), y_hat_batch.max().item())
-
-            # print("Prediction mean:", y_hat_batch.mean().item())
-            # print("Actual mean:", y_val_batch.mean().item())
-
         all_val_preds = torch.cat(all_val_preds, dim=1) # along columns, so they each become their own column
         all_val_targets = torch.cat(all_val_targets, dim=1) # also along columns
 
@@ -129,13 +122,44 @@ def train(pcrnn, n_epochs, x_batches, y_batches, x_val, y_val, eta_infer, eta_le
         binary_preds = (all_val_preds >= 0.5).float()
 
         accuracy = (binary_preds == all_val_targets).float().mean().item() # .float converts from bool to numerical value, which is then averaged with mean and the value is taken with .item
-        print(f"{accuracy=}")
+        if with_print: print(f"{accuracy=}")
         all_accuracies.append(accuracy)
 
-        print(f"Epoch {epoch+1} / {n_epochs}. VAL: val loss: {avg_val_loss:.5}, val accuracy: {accuracy}; TRAIN: avg infer error: {np.mean(ep_e_infer):.5}, avg gme infer: {np.mean(ep_gme_infer):.5}, avg error learn: {np.mean(ep_e_learn):.5}, avg gme learn: {np.mean(ep_gme_learn):.5}")
-        print("----------------------------------------------------------------------------------------------------------------------------------")
+        if with_print: print(f"Epoch {epoch+1} / {n_epochs}. VAL: val loss: {avg_val_loss:.5}, val accuracy: {accuracy}; TRAIN: avg infer error: {np.mean(ep_e_infer):.5}, avg gme infer: {np.mean(ep_gme_infer):.5}, avg error learn: {np.mean(ep_e_learn):.5}, avg gme learn: {np.mean(ep_gme_learn):.5}")
+        if with_print: print("----------------------------------------------------------------------------------------------------------------------------------")
     
     return error_history, gm_error_history, overall_val_errors, all_accuracies
+
+def train_pcrnn(pcrnn, n_epochs, T_infer, eta_infer, eta_learn, batch_size, random_seed, with_print): 
+    all_trains, all_vals, all_tests = split_into_train_val_test((computer_decision_tensors, player_decision_tensors), random_seed)
+
+    # structure of all_trains: 
+    # - 1st dimension (tuple) is cd versus pd
+    # - 2nd dimension (list of tensors) are scenarios (these comprise batches)
+    # - 3rd dimension (tensors) are sequences of decisions
+
+    # TODO: I couldn't find one of the printed decision series in the data. I need to figure out what caused that/what's going on
+    # NOTE: the paper doesn't clarify who made the first move. I'm assuming the player, but I know this could be wrong since I'm making an assumption
+
+    # x_batch (and therefore also all_trains) needs to have the format: d1 is step, d2 is sequence of timesteps, d3 is player decision + computer decision
+
+    all_trains = split_segments_to_tensor_pcrnn_format(all_trains)
+    all_vals = split_segments_to_tensor_pcrnn_format(all_vals)
+    all_tests = split_segments_to_tensor_pcrnn_format(all_tests)
+
+    train_x, train_y = get_x_y_batches(all_trains, batch_size)
+    val_x, val_y = get_x_y_batches(all_vals, batch_size)
+
+    train_mean = torch.cat([y.flatten() for y in train_y]).mean()
+    val_targets = torch.cat([y.flatten() for y in val_y])
+    baseline_loss = torch.mean(torch.abs(val_targets - train_mean))
+
+    out = train(pcrnn, n_epochs, train_x, train_y, val_x, val_y, eta_infer, eta_learn, T_infer, with_print)
+
+    return out, float(train_mean.item()), float(baseline_loss.item())
+    # print("Training mean baseline:", train_mean.item())
+    # print("Baseline validation loss:", baseline_loss.item())
+
 
 n_epochs = 50
 T_infer = 20
