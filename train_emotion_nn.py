@@ -1,12 +1,12 @@
 import pandas as pd
 from data_cleaning import cols_btw
 import torch
-from training_functions import train_nn
+from train_test import train_nn, test_nn
 from models import NeuralNet
 import numpy as np
-from sklearn.model_selection import train_test_split, GroupShuffleSplit
+from sklearn.model_selection import train_test_split, GroupShuffleSplit, GroupKFold
 from tqdm.auto import tqdm
-from testing_functions import get_avg_baseline, get_majority_baseline
+from baseline_functions import get_avg_baseline, get_majority_baseline
 import matplotlib.pyplot as plt
 from visualization import display_results
 
@@ -52,6 +52,51 @@ for index, row in df.iterrows():
         result.append(torch.tensor(decision))
         participant_ids.append(df.loc[index, 'ID'])
 
+def train_emotion_nn_ksplit(ksplits, epochs, batch_size, lr, report_every, with_print): 
+    # https://scikit-learn.org/stable/modules/cross_validation.html
+    gfk = GroupKFold(n_splits=ksplits)
+    losses = []
+    accuracies = []
+    test_losses = []
+    test_accuracies = []
+
+    test_avg_baselines = []
+    test_majority_baselines = []
+
+    for train_val_index, test_index in gfk.split(input_data, result, participant_ids): 
+        input_train_val = [input_data[i] for i in train_val_index]
+        result_train_val = [result[i] for i in train_val_index]
+
+        input_test = [input_data[i] for i in test_index]
+        result_test = [result[i] for i in test_index]
+        train_val_p_ids = np.array(participant_ids)[train_val_index]
+
+        splitter_2 = GroupShuffleSplit(n_splits=1, test_size=0.2)
+        train_index, val_index = next(splitter_2.split(input_train_val, result_train_val, train_val_p_ids))
+
+        input_train = [input_train_val[i] for i in train_index]
+        result_train = [result_train_val[i] for i in train_index]
+
+        input_val = [input_train_val[i] for i in val_index]
+        result_val = [result_train_val[i] for i in val_index]
+
+        e_nn = NeuralNet(20)
+        out = train_nn(e_nn, input_train, result_train, input_val, result_val, n_epoch=epochs, n_batch_size=batch_size, learning_rate=lr, report_every=report_every, with_print=with_print, accuracy=True)
+
+        test_loss, test_accuracy = test_nn(e_nn, input_test, result_test, True)
+
+        test_avg_baseline = get_avg_baseline(result_train, result_test)
+        test_majority_baseline = get_majority_baseline(result_train, result_test)
+        
+        losses.append(np.mean(out['losses']))
+        accuracies.append(np.mean(out['accuracies']))
+        test_avg_baselines.append(test_avg_baseline)
+        test_majority_baselines.append(test_majority_baseline)
+        test_losses.append(test_loss)
+        test_accuracies.append(test_accuracy)
+
+    return losses, accuracies, test_avg_baselines, test_majority_baselines, test_losses, test_accuracies
+
 
 def train_emotion_nn(epochs, batch_size, lr, report_every, with_print, random_seed=None): 
     # https://scikit-learn.org/stable/modules/generated/sklearn.model_selection.GroupShuffleSplit.html
@@ -73,35 +118,77 @@ def train_emotion_nn(epochs, batch_size, lr, report_every, with_print, random_se
     input_test = [input_val_test[i] for i in test_index]
     result_test = [result_val_test[i] for i in test_index]
 
-    out = train_nn(NeuralNet(20), input_train, result_train, input_val, result_val, n_epoch=epochs, n_batch_size=batch_size, learning_rate=lr, random_seed=random_seed, report_every=report_every, with_print=with_print, accuracy=True)
-    return out, get_avg_baseline(result_train, result_val), get_majority_baseline(result_train, result_val)
+    e_nn = NeuralNet(20)
+    out = train_nn(e_nn, input_train, result_train, input_val, result_val, n_epoch=epochs, n_batch_size=batch_size, learning_rate=lr, random_seed=random_seed, report_every=report_every, with_print=with_print, accuracy=True)
+
+    val_avg_baseline = get_avg_baseline(result_train, result_val)
+    val_majority_baseline = get_majority_baseline(result_train, result_val)
+
+    test_avg_baseline = get_avg_baseline(result_train, result_test)
+    test_majority_baseline = get_majority_baseline(result_train, result_test)
+
+    return e_nn, out, [val_avg_baseline, val_majority_baseline, test_avg_baseline, test_majority_baseline], input_test, result_test
 
 
 loop = input("Full loop (l) or defined config (d): ")
 report_every = int(input("Report every X epochs (must be an integer): "))
 
 if loop == 'd': 
-    num_times = int(input("How many times do you want to run this model? "))
+    print("\nHyperparameters: ")
     epochs = int(input("Number of epochs (must be an integer): "))
     learning_rate = float(input("Learning rate (must be a float): "))
     batch_size = int(input("Batch size (must be an integer): "))
 
-    all_outs = []
-    all_avg_bs = []
-    all_maj_bs = []
-    for _ in range(num_times): 
-        out, avg_b, maj_b = train_emotion_nn(epochs, batch_size, learning_rate, report_every, True)
-        all_outs.append(out)
-        all_avg_bs.append(avg_b)
-        all_maj_bs.append(maj_b)
+    print() # need a new line, so its not as cluttered and so the user clearly knows that they're now entering model hyperparameters
+    print("Training/testing details: ")
+    cross_val_or_random = input("Cross val or random splits (c/r)? ")
 
-    # avg all lowest losses
-    lowest_avg = 0
-    for out in all_outs: 
-        lowest_avg += min(out['losses'])
-    lowest_avg /= len(all_outs)
-    print(f"Lowest loss: {lowest_avg:.7} vs avg baseline: {np.mean(all_avg_bs):.7} vs majority baseline: {np.mean(all_avg_bs):.7}")
-    display_results(all_outs, report_every, charts=True, accuracy=True, multiple=True) # want to see plots and display accuracy
+    if cross_val_or_random == 'c': 
+        num_cross_val = int(input(("How many folds would you like? ")))
+        losses, accuracies, avg_baselines, majority_baselines, test_losses, test_accuracies = train_emotion_nn_ksplit(num_cross_val, epochs, batch_size, learning_rate, report_every, True)
+        
+        print("Cross validation results: ")
+        print(f"Average test loss: {np.mean(test_losses)} vs average baseline: {np.mean(avg_baselines)} vs majority baseline: {np.mean(majority_baselines)}")
+        print(f"Average test accuracy: {np.mean(test_accuracies)}, standard deviation: {np.std(test_accuracies, ddof=1)}") # divides by the population -1 I think
+
+        out = {
+            'losses': losses, 
+            'test_losses': test_losses, 
+            'accuracies': accuracies
+        }
+        display_results(out, report_every, True, True, False)
+
+    else: 
+        num_times = int(input("How many times do you want to randomly run this model (>=1, repeated random group holdout)? "))
+        test = False
+        if num_times == 1: 
+            train_or_test = input("Would you like to test this model after (y/n): ")
+            if train_or_test == 'y': test = True
+        
+        all_outs = []
+        all_avg_bs = []
+        all_maj_bs = []
+
+        for _ in range(num_times): 
+            model, out, baselines, test_i, test_r = train_emotion_nn(epochs, batch_size, learning_rate, report_every, True)
+            all_outs.append(out)
+            all_avg_bs.append(baselines[0])
+            all_maj_bs.append(baselines[1])
+        
+        # avg all lowest losses
+        lowest_avg = 0
+        for out in all_outs: 
+            lowest_avg += min(out['losses'])
+        lowest_avg /= len(all_outs)
+        print(f"Lowest loss: {lowest_avg:.7} vs avg baseline: {np.mean(all_avg_bs):.7} vs majority baseline: {np.mean(all_avg_bs):.7}")
+        
+        if test: # only one model, out, etc. bc you can only test if you only train once
+            avg_test_loss, avg_acc = test_nn(model, test_i, test_r, True)
+
+            print(f"Average test loss: {avg_test_loss}, test accuracy: {avg_acc}")
+            print(f"Average test baseline: {baselines[2]}, majority test baseline: {baselines[3]}")
+
+        display_results(all_outs[0] if num_times == 1 else all_outs, report_every, charts=True, accuracy=True, multiple= num_times > 1) # want to see plots and display accuracy
 else: 
     # comprehensive optimal configuration finder loop
     epochs = list(range(5, 50, 5))
@@ -143,7 +230,7 @@ else:
 
                     for rs in random_seeds: 
                         nn = NeuralNet(20)
-                        out, avg_b, maj_b = train_emotion_nn(epochs=epoch, batch_size=batch_size, lr=lr, report_every=report_every, with_print=False, random_seed=rs)
+                        model, out, avg_b, maj_b, _, _ = train_emotion_nn(epochs=epoch, batch_size=batch_size, lr=lr, report_every=report_every, with_print=False, random_seed=rs)
                         if avg_loss == None: 
                             avg_loss = [0] * len(out['losses'])
                             avg_test_loss = [0] * len(out['test_losses'])

@@ -5,7 +5,27 @@ import random
 import numpy as np
 from scipy.stats import linregress # https://stackoverflow.com/questions/9538525/calculating-slopes-in-numpy-or-scipy
 
-def train_nn(model, input_data=[], targets=[], test_data=[], test_targets=[], n_epoch=40, n_batch_size=10, report_every=5, learning_rate=0.001, criterion=nn.MSELoss(), random_seed=None, with_print=True, accuracy=False): # seed is for batching
+def test_nn(model, test_input, test_labels, accuracy=False, criterion=nn.MSELoss()): 
+    test_losses = []
+    accuracies = []
+    model.eval()
+    with torch.no_grad(): 
+        for i in range(len(test_input)): 
+            input_tensor = test_input[i].to(torch.float32)
+            output = model(input_tensor).squeeze() # gives me the dimensions I want
+            target = (test_labels[i].float()-1).squeeze() # TODO: I realize this sort of data transformation (subtracting one from all decision labels) shouldn't be happening here, it should be happening in the training files
+            loss = float(criterion(output, target))
+            test_losses.append(loss)
+
+            if accuracy: 
+                pred = 1.0 if output > 0.5 else 0.0
+                acc = (pred == target).float().mean().item()
+                accuracies.append(acc)
+    if accuracy: 
+        return np.mean(test_losses), np.mean(accuracies)
+    return np.mean(test_losses), None
+
+def train_nn(model, input_data=None, targets=None, test_data=None, test_targets=None, n_epoch=40, n_batch_size=10, report_every=5, learning_rate=0.001, criterion=nn.MSELoss(), random_seed=None, with_print=True, accuracy=False): # seed is for batching
     random.seed(random_seed) # for batching
     current_loss = 0
     all_losses = []
@@ -27,7 +47,7 @@ def train_nn(model, input_data=[], targets=[], test_data=[], test_targets=[], n_
 
         for idx, batch in enumerate(batches): 
             # print(f"batch: {batch}")
-            batch_loss = 0
+            batch_losses = []
             for item in batch: 
                 # print(f"{input_data[batch]=}")
                 input_tensor = input_data[item].to(torch.float32)
@@ -36,57 +56,62 @@ def train_nn(model, input_data=[], targets=[], test_data=[], test_targets=[], n_
                 target = (targets[item].float()-1).squeeze()
 
                 loss = criterion(output, target)
-                batch_loss += loss
-                
+                batch_losses.append(loss)
+
+            # get mean batch loss for backprop
+            batch_loss = torch.stack(batch_losses).mean()
             batch_loss.backward()
             optimizer.step()
             optimizer.zero_grad()
             
-            current_loss += batch_loss.item()
+            current_loss += batch_loss.item() * len(batch) # so it includes the losses for all samples
         
         all_losses.append(current_loss / len(input_data))
+        current_loss = 0
         
         if k % report_every == 0: 
             # calculate accuracy on validation set
-            model.eval()
-            with torch.no_grad(): 
-                test_batch_losses = []
-                accuracies = []
-                for item in range(len(test_data)): 
-                    # print(f"batch: {batch}")
-                    input_tensor = test_data[item].to(torch.float32)
-                    output = model(input_tensor).squeeze()
-                    target = (test_targets[item].float()-1).squeeze()
-                    loss = criterion(output, target)
-                    test_batch_losses.append(loss)
-
-                    if accuracy: 
-                        pred = 1.0 if output > 0.5 else 0.0 # should be a float for comparison with target
-                        acc = (pred == target).float().mean().item()
-                        accuracies.append(acc)
-
-                epoch_test_loss = float(np.mean(test_batch_losses))
-                all_test_losses.append(epoch_test_loss)
-                
-                if accuracy: all_accuracies.append(np.mean(accuracies))
-                
+            avg_test_batch_loss, acc_avg = test_nn(model, test_data, test_targets, accuracy, criterion) # NOTE: this is called test data and test_nn, but I'm passing in validation data here for training, not test data
+            all_test_losses.append(avg_test_batch_loss)
+            if accuracy: all_accuracies.append(acc_avg)
+            
             to_print_string = f"{k} ({k / n_epoch:.3f}): \t avg batch loss = {all_losses[-1]:.5f} \t avg batch test loss = {all_test_losses[-1]:.5f}"
             if accuracy: to_print_string += f"\t avg batch acc = {all_accuracies[-1]}"
             if with_print: print(to_print_string) # NOTE: accuracies and test losses may not update every epoch like all_losses does
+    
+    if with_print: 
+        to_print = "done training, "
+        if len(all_losses) > 1: 
+            to_print += f"\t avg improvement in losses: {linregress(list(range(len(all_losses))), all_losses).slope:.4f}"
+        if len(all_test_losses) > 1: 
+            to_print += f"\t avg improvement in test losses: {linregress(list(range(len(all_test_losses))), all_test_losses).slope:.4f}"
+        print(to_print)
 
-        current_loss = 0
-
-    if with_print: print(f"done training,\t avg improvement in losses: {linregress(list(range(len(all_losses))), all_losses).slope:.4f} \t avg improvement in test losses: {linregress(list(range(len(all_test_losses))), all_test_losses).slope:.4f}")
     result = {
         'losses': all_losses, 
         'test_losses': all_test_losses, 
-        'avg_loss_improvement': linregress(list(range(len(all_losses))), all_losses).slope, # could re-calculate back in train_nn file but why do it there if I've already done it here? 
-        'avg_test_loss_improvement': linregress(list(range(len(all_test_losses))), all_test_losses).slope, 
     }
+
+    to_print = "done training, "
+    if len(all_losses) > 1: 
+        avg_loss_improvement = linregress(list(range(len(all_losses))), all_losses).slope
+        result['avg_loss_improvement'] = avg_loss_improvement
+        to_print += f"\t avg improvement in losses: {avg_loss_improvement:.4f}"
+
+    if len(all_test_losses) > 1: 
+        avg_test_loss_improvement = linregress(list(range(len(all_test_losses))), all_test_losses).slope
+        result['avg_test_loss_improvement'] = avg_test_loss_improvement
+        to_print += f"\t avg improvement in test losses: {avg_test_loss_improvement:.4f}"
+
+    if with_print: print(to_print)
+
     if accuracy: 
         result['accuracies'] = all_accuracies
+
     return result
 
+
+# ORIGINAL RNN CODE
 # not given payoff information - its not trying to maximize its payoff, its trying to mimic how behavior develops
 def create_input_tensor(computer_decisions, player_decisions, player, decision): 
     # combines computer decision & most recent player decision

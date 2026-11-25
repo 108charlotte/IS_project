@@ -12,7 +12,6 @@ def display_results(out, report_every=None, charts=True, accuracy=False, multipl
                 fig, axes = plt.subplots(num_rows,2,figsize=(12,8))
             else: 
                 fig, axes = plt.subplots(num_rows, 3, figsize=(12,8))
-
             for i, o in enumerate(out): 
                 train_x = range(1, len(o['losses'])+1)
                 test_x = range(1, len(o['test_losses'])+1)
@@ -43,7 +42,6 @@ def display_results(out, report_every=None, charts=True, accuracy=False, multipl
             make_chart(out, accuracy, report_every)
 
 def make_chart(out, accuracy, report_every): 
-    print(f"Average loss improvement: {out['avg_loss_improvement']}\nAverage test loss improvement: {out['avg_test_loss_improvement']}")
     # dynamic for different outputs
     if not accuracy: 
         fig, axes = plt.subplots(1,2,figsize=(12,8))

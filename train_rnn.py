@@ -1,7 +1,7 @@
 import pandas as pd
 from data_cleaning import cols_btw
 import torch
-from training_functions import train_rnn
+from train_test import train_rnn
 from models import RNN
 from sklearn.model_selection import train_test_split
 
@@ -71,8 +71,8 @@ all_trains, all_vals, all_tests = split_into_train_val_test((computer_decision_t
 # 2 = player_payoffs
 # 3 = computer_payoffs
 
-from testing_functions import get_majority_baseline
-get_majority_baseline(all_vals[1])
+from baseline_functions import get_majority_baseline
+get_majority_baseline(all_trains[1], all_vals[1])
 
 rnn = RNN(2, 8, 2) # list of their decisions, list of their opponent's decisions, list of their payoffs, list of their opponent's payoffs
 train_rnn(rnn, all_trains, all_vals) # passing in lists of 1D tensors
