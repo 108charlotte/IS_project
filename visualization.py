@@ -37,6 +37,7 @@ def display_results(out, report_every=None, charts=True, accuracy=False, multipl
                     axes[i, 2].set_ylabel("Accuracy")
                     axes[i, 2].grid(True)
 
+            plt.tight_layout()
             plt.show()
         else: 
             make_chart(out, accuracy, report_every)
@@ -72,4 +73,47 @@ def make_chart(out, accuracy, report_every):
         axes[2].set_ylabel("Accuracy")
         axes[2].grid(True)
 
+    plt.show()
+
+
+def display_pcrnn_results(n_epochs, inference_errors, inference_gm_errors, learning_errors, learning_gm_errors, val_errors, val_accuracies): 
+    fig, axes = plt.subplots(3, 2, figsize=(12,8))
+
+    axes[0, 0].plot(n_epochs, inference_errors, marker='o')
+    axes[0, 0].set_title("Error History (Infer)")
+    axes[0, 0].set_xlabel("Epoch")
+    axes[0, 0].set_ylabel("Error")
+    axes[0, 0].grid(True)
+
+    axes[0, 1].plot(n_epochs, inference_gm_errors, marker='o')
+    axes[0, 1].set_title("Gain Mod Error History (Infer)")
+    axes[0, 1].set_xlabel("Epoch")
+    axes[0, 1].set_ylabel("Error")
+    axes[0, 1].grid(True)
+
+    axes[1, 0].plot(n_epochs, learning_errors, marker='o')
+    axes[1, 0].set_title("Error History (Learning)")
+    axes[1, 0].set_xlabel("Epoch")
+    axes[1, 0].set_ylabel("Error")
+    axes[1, 0].grid(True)
+
+    axes[1, 1].plot(n_epochs, learning_gm_errors, marker='o')
+    axes[1, 1].set_title("Gain Mod Error History (Learning)")
+    axes[1, 1].set_xlabel("Epoch")
+    axes[1, 1].set_ylabel("Error")
+    axes[1, 1].grid(True)
+
+    axes[2, 0].plot(n_epochs, val_errors, marker='o')
+    axes[2, 0].set_title("Validation Errors")
+    axes[2, 0].set_xlabel("Epoch")
+    axes[2, 0].set_ylabel("Error")
+    axes[2, 0].grid(True)
+
+    axes[2, 1].plot(n_epochs, val_accuracies, marker='o')
+    axes[2, 1].set_title("Validation Accuracy")
+    axes[2, 1].set_xlabel("Epoch")
+    axes[2, 1].set_ylabel("Accuracy")
+    axes[2, 1].grid(True)
+
+    plt.tight_layout()
     plt.show()

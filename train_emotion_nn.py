@@ -162,7 +162,7 @@ if loop == 'd':
         num_times = int(input("How many times do you want to randomly run this model (>=1, repeated random group holdout)? "))
         test = False
         if num_times == 1: 
-            train_or_test = input("Would you like to test this model after (y/n): ")
+            train_or_test = input("Would you like to test this model after training (y/n): ")
             if train_or_test == 'y': test = True
         
         all_outs = []

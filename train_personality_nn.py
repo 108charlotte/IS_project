@@ -1,11 +1,10 @@
 import pandas as pd
 from data_cleaning import cols_btw
 import torch
-from train_test import train_nn
+from train_test import train_nn, test_nn
 from models import NeuralNet
 import numpy as np
 from sklearn.model_selection import train_test_split
-import json
 from tqdm.auto import tqdm
 from baseline_functions import get_avg_baseline
 from visualization import display_results
@@ -32,11 +31,10 @@ for i in range(len(pp01)):
 player_decision_cols = cols_btw('G101', 'G130')
 player_decisions = df[player_decision_cols]
 avg_decisions = []
+
 for i in range(len(player_decisions)): 
     avg_decisions.append(torch.tensor(np.mean(player_decisions.iloc[i, :])))
 # something to look into: does personality play a bigger impact at certain moments, ex. the beginning or middle of a game? 
-
-report_every = 5
 
 def train_model(character_identifier, epochs, batch_size, lr, report_every, with_print, random_seed=None): 
     ni_train, ni_val_test, pp01_train, pp01_val_test, avg_decisions_train, avg_decisions_val_test = train_test_split(ni_tensors,pp01_tensors, avg_decisions, test_size=0.3, train_size=0.7, random_state=random_seed)
@@ -53,38 +51,67 @@ def train_model(character_identifier, epochs, batch_size, lr, report_every, with
 
     match character_identifier: 
         case 'n': 
-            out = train_nn(NeuralNet(16), ni_train, avg_decisions_train, ni_val, avg_decisions_val, n_epoch=epochs, n_batch_size=batch_size, learning_rate=lr, random_seed=random_seed, report_every=report_every, with_print=with_print)
+            model = NeuralNet(16)
+            out = train_nn(model, ni_train, avg_decisions_train, ni_val, avg_decisions_val, n_epoch=epochs, n_batch_size=batch_size, learning_rate=lr, random_seed=random_seed, report_every=report_every, with_print=with_print)
         case 'p': 
-            out = train_nn(NeuralNet(40), pp01_train, avg_decisions_train, pp01_val, avg_decisions_val, n_epoch=epochs, n_batch_size=batch_size, learning_rate=lr, random_seed=random_seed, report_every=report_every, with_print=with_print)
+            model = NeuralNet(40)
+            out = train_nn(model, pp01_train, avg_decisions_train, pp01_val, avg_decisions_val, n_epoch=epochs, n_batch_size=batch_size, learning_rate=lr, random_seed=random_seed, report_every=report_every, with_print=with_print)
         case 'c': 
-            out = train_nn(NeuralNet(16+40), combined_train, avg_decisions_train, combined_val, avg_decisions_val, n_epoch=epochs, n_batch_size=batch_size, learning_rate=lr, random_seed=random_seed, report_every=report_every, with_print=with_print)
+            model = NeuralNet(16+40)
+            out = train_nn(model, combined_train, avg_decisions_train, combined_val, avg_decisions_val, n_epoch=epochs, n_batch_size=batch_size, learning_rate=lr, random_seed=random_seed, report_every=report_every, with_print=with_print)
         case _: 
             print(f"INVALID MODEL CHARACTER IDENTIFIER")
             out = {}
 
-    return out, get_avg_baseline(avg_decisions_train, avg_decisions_val)
+    return model, out, get_avg_baseline(avg_decisions_train, avg_decisions_val), ni_test, pp01_test
 
 
 loop = input("Full loop (l) or defined config (d): ")
+report_every = int(input("Report every X epochs (must be an integer): "))
 
 if loop == 'd': 
+    print("\nHyperparameters: ")
     model_input = input("NI, PP01, or combined? (n, p, c): ")
     epochs = int(input("Number of epochs (must be an integer): "))
     learning_rate = float(input("Learning rate (must be a float): "))
     batch_size = int(input("Batch size (must be an integer): "))
-    report_every = int(input("Report every X epochs (must be an integer): "))
 
-    if model_input not in ['n', 'p', 'c']: 
-        print("Invalid model type. Please enter n, p, or c")
-    else: 
-        out, baseline = train_model(model_input, epochs, batch_size, learning_rate, report_every, True)
-        print(f"Baseline validation MSE: {baseline}")
-        display_results(out, report_every, True) # want to see plots
+    print("\nTraining/testing details: ")
+    num_times = int(input("How many times do you want to randomly run this model? "))
+    print()
+
+    test = False
+    if num_times == 1: 
+        train_or_test = input("Would you like to test this model after training (y/n):")
+        if train_or_test == 'y': test = True
+    
+    all_outs = []
+    all_avg_bs = []
+
+    for _ in range(num_times): 
+        model, out, avg_baseline, test_i, test_r = train_model(model_input,epochs,batch_size, learning_rate, report_every, True)
+        all_outs.append(out)
+        all_avg_bs.append(avg_baseline)
+    
+    lowest_avg = 0
+    for out in all_outs: 
+        lowest_avg += min(out['losses'])
+    lowest_avg /= len(all_outs)
+    print(f"Lowest loss: {lowest_avg:.7} vs avg baseline: {np.mean(all_avg_bs):.7}")
+
+    if test: # only one model, out, etc. bc you can only test if you only train once
+        avg_test_loss, avg_acc = test_nn(model, test_i, test_r)
+
+        print(f"Average test loss: {avg_test_loss}, test accuracy: {avg_acc}")
+        print(f"Average test baseline: {avg_baseline}")
+
+    display_results(all_outs[0] if num_times == 1 else all_outs, report_every, charts=True, accuracy=False, multiple= num_times > 1) # want to see plots and display accuracy
+
 else: 
-    # comprehensive optimal configuration finder loop
-    epochs = list(range(0, 15, 2))
-    learning_rates = [0.0005, 0.001, 0.005, 0.01]
-    batch_sizes = list(range(1, 15, 3))
+    # optimal hyperparam finder loop
+    epochs = list(range(5, 30, 5))
+    learning_rates = [0.0001, 0.0005, 0.001, 0.005]
+    batch_sizes = list(range(15, 36, 5))
     random_seeds = [2, 4, 6, 9, 42, 109]
     models = ['n', 'p', 'c']
 
@@ -123,7 +150,7 @@ else:
 
                         for rs in random_seeds: 
                             # function will automatically create a new neural net each time
-                            out, baseline = train_model(model, epoch, batch_size, lr, report_every, False, rs)
+                            _, out, baseline, _, _ = train_model(model, epoch, batch_size, lr, report_every, False, rs)
                             if avg_loss == None: 
                                 avg_loss = [0] * len(out['losses'])
                                 avg_test_loss = [0] * len(out['test_losses'])

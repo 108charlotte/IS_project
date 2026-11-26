@@ -90,6 +90,9 @@ def train_nn(model, input_data=None, targets=None, test_data=None, test_targets=
     result = {
         'losses': all_losses, 
         'test_losses': all_test_losses, 
+        # I don't really care about these values anyway, this is to stop things from breaking if there are too few epochs for the report_every number
+        'avg_loss_improvement': 0, 
+        'avg_test_loss_improvement': 0
     }
 
     to_print = "done training, "

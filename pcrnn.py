@@ -168,7 +168,7 @@ class PredictiveCodingNetwork(nn.Module):
         return inputs_latents, all_errors, all_gm_errors # I'm not sure if/how these will be useful, but I do want something I can use to measure the accuracy of training
 
 # TODO: make defense for why I chose two PCN layers
-class PredictiveCodingRNN(nn.ModuleList): 
+class PredictiveCodingRNN(nn.Module): 
     def __init__(self, n_time_steps, nn_dims, nn_output_dim, activation_fn=torch.relu, activation_deriv=lambda a: (a > 0).float()): # nn_dims will be 2 for me, plus 1 output layer
         super().__init__()
         # n_time_steps = the number of PCNs needed
