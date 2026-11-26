@@ -76,7 +76,7 @@ baseline_loss = torch.mean(torch.abs(val_targets - train_mean))
 print("Training mean baseline:", train_mean.item())
 print("Baseline validation loss:", baseline_loss.item())
 
-def train(pcrnn, n_epochs, x_batches, y_batches, x_val, y_val, eta_infer, eta_learn, T_infer, with_print=True): 
+def train(pcrnn, n_epochs, x_batches, y_batches, x_val, y_val, eta_infer, eta_learn, T_infer, with_print=True, report_every=1): 
     pcrnn.train()
     error_history, gm_error_history = {'infer': [], 'learn': []}, {'infer': [], 'learn': []}
     all_val_errors, all_accuracies = [], []
@@ -121,15 +121,14 @@ def train(pcrnn, n_epochs, x_batches, y_batches, x_val, y_val, eta_infer, eta_le
         binary_preds = (all_val_preds >= 0.5).float()
 
         accuracy = (binary_preds == all_val_targets).float().mean().item() # .float converts from bool to numerical value, which is then averaged with mean and the value is taken with .item
-        if with_print: print(f"{accuracy=}")
         all_accuracies.append(accuracy)
 
-        if with_print: print(f"Epoch {epoch+1} / {n_epochs}. VAL: val loss: {avg_val_loss:.5}, val accuracy: {accuracy}; TRAIN: avg infer error: {np.mean(ep_e_infer):.5}, avg gme infer: {np.mean(ep_gme_infer):.5}, avg error learn: {np.mean(ep_e_learn):.5}, avg gme learn: {np.mean(ep_gme_learn):.5}")
-        if with_print: print("-------------------------------------------")
-    
+        if with_print and epoch % report_every == 0: print(f"Epoch {epoch+1}/{n_epochs}, VAL: val loss: {avg_val_loss:.5}, val accuracy: {accuracy:.5}; TRAIN: avg infer error: {np.mean(ep_e_infer):.5}, avg gme infer: {np.mean(ep_gme_infer):.5}, avg error learn: {np.mean(ep_e_learn):.5}, avg gme learn: {np.mean(ep_gme_learn):.5}")
+
+
     return error_history, gm_error_history, all_val_errors, all_accuracies
 
-def train_pcrnn(pcrnn, n_epochs, T_infer, eta_infer, eta_learn, batch_size, with_print, computer=False, random_seed=None): 
+def train_pcrnn(pcrnn, n_epochs, T_infer, eta_infer, eta_learn, batch_size, with_print, computer=False, random_seed=None, report_every=1): 
     if not computer: 
         all_trains, all_vals, all_tests = split_into_train_val_test((computer_decision_tensors, player_decision_tensors), random_seed=random_seed)
     else: # flipping which is which
@@ -157,7 +156,7 @@ def train_pcrnn(pcrnn, n_epochs, T_infer, eta_infer, eta_learn, batch_size, with
     val_targets = torch.cat([y.flatten() for y in val_y])
     baseline_loss = torch.mean(torch.abs(val_targets - train_mean))
 
-    out = train(pcrnn, n_epochs, train_x, train_y, val_x, val_y, eta_infer, eta_learn, T_infer, with_print)
+    out = train(pcrnn, n_epochs, train_x, train_y, val_x, val_y, eta_infer, eta_learn, T_infer, with_print, report_every=report_every)
 
     return out, float(baseline_loss.item()), all_tests # so that I have both player and computer decisions; will be useful when testing
     # print("Training mean baseline:", train_mean.item())
@@ -203,24 +202,45 @@ def full_forward_test(player_rnn, computer_rnn, player_first_decision, computer_
     return all_player_decision_preds, all_computer_decision_preds
 
 print("\nModel Training Details")
+report_every = int(input("Report every X epochs (integers only): "))
 p_c_b = input("Would you like to train just the player decision prediction model, just the computer decision prediction model, or both (p, c, or b)? ")
 num_times_p, num_times_c = 0, 0
 
-if p_c_b in ['p', 'b']: 
-    num_times_p = int(input("How many times would you like to train the player model? "))
+# gather all data first, so that the person running the code can just let it run after the beginning
 
-    # train player model
+if p_c_b in ['p', 'b']: 
     print("\nHyperparameters for player model: ")
     p_n_epochs = int(input("Number of epochs for training: "))
     p_T_infer = int(input("T infer (number of inference loops): "))
     p_eta_infer = float(input("Inference rate: "))
     p_eta_learn = float(input("Learning rate: "))
 
+    print("\nTraining info: ")
+    num_times_p = int(input("How many times would you like to train the player model? "))
+
+    print()
+
+if p_c_b in ['c', 'b']: 
+    print("\nHyperparameters for computer model: ")
+    c_n_epochs = int(input("Number of epochs for training: "))
+    c_T_infer = int(input("T infer (number of inference loops): "))
+    c_eta_infer = float(input("Inference rate: "))
+    c_eta_learn = float(input("Learning rate: "))
+
+    print("\nTraining info: ")
+    num_times_c = int(input("How many times would you like to train the computer model? "))
+
+    print()
+
+
+if p_c_b in ['p', 'b']: 
+    # train player model
     p_outs, p_mean_baselines = [], []
 
-    for _ in range(num_times_p): 
+    for i in range(num_times_p): 
+        print(f"\nStarting Player Model Training {i+1} / {num_times_c}")
         player_pcrnn = PredictiveCodingRNN(29, [2, 10, 5], 1)
-        p_out, p_mean_baseline, p_tests = train_pcrnn(player_pcrnn, p_n_epochs, p_T_infer, p_eta_infer, p_eta_learn, batch_size, with_print=True)
+        p_out, p_mean_baseline, p_tests = train_pcrnn(player_pcrnn, p_n_epochs, p_T_infer, p_eta_infer, p_eta_learn, batch_size, with_print=True, report_every=report_every)
         p_outs.append(p_out)
         p_mean_baselines.append(p_mean_baseline)
 
@@ -238,20 +258,12 @@ if p_c_b in ['p', 'b']:
 
 if p_c_b in ['c', 'b']: 
     # train computer model
-    print("\nHyperparameters for computer model: ")
-    c_n_epochs = int(input("Number of epochs for training: "))
-    c_T_infer = int(input("T infer (number of inference loops): "))
-    c_eta_infer = float(input("Inference rate: "))
-    c_eta_learn = float(input("Learning rate: "))
-
-    print("\nTraining info: ")
-    num_times_c = int(input("How many times would you like to train the computer model? "))
-
     c_outs, c_mean_baselines = [], []
 
-    for _ in range(num_times_c): 
+    for i in range(num_times_c): 
+        print(f"\nStarting Computer Model Training {i+1} / {num_times_c}")
         computer_pcrnn = PredictiveCodingRNN(29, [2, 10, 5], 1)
-        c_out, c_mean_baseline, c_tests = train_pcrnn(computer_pcrnn, c_n_epochs, c_T_infer, c_eta_infer, c_eta_learn, batch_size, with_print=True)
+        c_out, c_mean_baseline, c_tests = train_pcrnn(computer_pcrnn, c_n_epochs, c_T_infer, c_eta_infer, c_eta_learn, batch_size, with_print=True, report_every=report_every)
         c_outs.append(c_out)
         c_mean_baselines.append(c_mean_baseline)
 
@@ -267,8 +279,10 @@ if p_c_b in ['c', 'b']:
     print(f"vs average loss baseline: {np.mean(c_mean_baselines)}")
     print(f"Average highest accuracy: {np.mean(c_highest_accuracies)}, w/ standard deviation: {np.std(c_highest_accuracies, ddof=1)}")
 
+# potentially test models
 if p_c_b == 'b' and num_times_p == 1 and num_times_c == 1: 
-    to_test = input("Would you like to test these PCRNNs (y/n)? ")
+    print()
+    to_test = input("INPUT REQUIRED: Would you like to test these PCRNNs (y/n)? ")
     if to_test == 'y': 
         with torch.no_grad(): 
             player_pcrnn.eval()
@@ -320,6 +334,7 @@ if p_c_b == 'b' and num_times_p == 1 and num_times_c == 1:
         print("\nTest results: ")
         print("Note: the models are each only predicting the next decision when given the correct past sequence (regardless of their predictions for past decisions)")
 
+# summarize results for player model and display
 if p_c_b in ['p', 'b']: 
     p_inference_errors = [p_out[0]['infer'] for p_out in p_outs]
     p_inference_gm_errors = [p_out[1]['infer'] for p_out in p_outs]
@@ -329,8 +344,9 @@ if p_c_b in ['p', 'b']:
     p_val_errors = [p_out[2] for p_out in p_outs]
     p_val_accs = [p_out[3] for p_out in p_outs]
 
-    display_pcrnn_results(p_inference_errors, p_inference_gm_errors, p_learning_errors, p_learning_gm_errors, p_val_errors, p_val_accs)
+    display_pcrnn_results(num_times_p, p_inference_errors, p_inference_gm_errors, p_learning_errors, p_learning_gm_errors, p_val_errors, p_val_accs)
 
+# summarize results for computer model and display
 if p_c_b in ['c', 'b']: 
     c_inference_errors = [c_out[0]['infer'] for c_out in c_outs]
     c_inference_gm_errors = [c_out[1]['infer'] for c_out in c_outs]
@@ -340,4 +356,4 @@ if p_c_b in ['c', 'b']:
     c_val_errors = [c_out[2] for c_out in c_outs]
     c_val_accs = [c_out[3] for c_out in c_outs]
 
-    display_pcrnn_results(c_inference_errors, c_inference_gm_errors, c_learning_errors, c_learning_gm_errors, c_val_errors, c_val_accs)
+    display_pcrnn_results(num_times_c, c_inference_errors, c_inference_gm_errors, c_learning_errors, c_learning_gm_errors, c_val_errors, c_val_accs)
