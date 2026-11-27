@@ -12,7 +12,7 @@ import copy
 # architecture
 # layers
 class PCNLayer(nn.Module): 
-    def __init__(self, in_dim, out_dim, activation_fn=torch.relu, activation_deriv=lambda a: (a > 0).float()): # I may turn this into tanh
+    def __init__(self, in_dim, out_dim, activation_fn=torch.tanh, activation_deriv=lambda a: 1 - torch.tanh(a).pow(2)): # I may turn this into tanh
         super().__init__()
         self.W = nn.Parameter(torch.empty(out_dim, in_dim)) # layer weights
         nn.init.xavier_uniform_(self.W) # initialize W_ls with xavier init
@@ -28,7 +28,7 @@ class PCNLayer(nn.Module):
     
 # boxes (PCN)
 class PredictiveCodingNetwork(nn.Module):
-    def __init__(self, dims, output_dim, activation_fn=torch.relu, activation_deriv=lambda a: (a > 0).float()): 
+    def __init__(self, dims, output_dim, activation_fn=torch.tanh, activation_deriv=lambda a: 1 - torch.tanh(a).pow(2)): 
         super().__init__()
         self.dims = dims # number of layers it will have
         self.L = len(dims)-1
@@ -38,6 +38,8 @@ class PredictiveCodingNetwork(nn.Module):
             for l in range(self.L)
         ])
         self.readout = nn.Linear(dims[-1], output_dim)
+        self.readout_optimizer = torch.optim.Adam(self.readout.parameters(), lr=0.001) # TODO: make this learning rate not a magic number/an input
+        self.readout_loss = nn.BCEWithLogitsLoss()
         self.readout_activation = nn.Sigmoid()
         self.readout_activation_deriv = lambda a: a * (1-a)
 
@@ -105,28 +107,9 @@ class PredictiveCodingNetwork(nn.Module):
 
         return working_inputs_latents, errors, gain_modulated_errors, all_activations
     
-    def debugging_inference(self, T_infer, x_batch, last_activations, eta_infer, y_batch): 
+    def inference(self, T_infer, x_batch, eta_infer): 
         with torch.no_grad(): 
-            supervised_errors = []
-            inputs_latents = [x_batch] + copy.deepcopy(last_activations)
-            all_errors, all_gm_errors, all_activations = [], [], []
-
-            for t in range(1, T_infer + 1): 
-                inputs_latents, errors, gain_modulated_errors, activations = self.infer(inputs_latents, eta_infer)
-                all_errors.append(errors)
-                all_gm_errors.append(gain_modulated_errors)
-                all_activations.append(activations) # creates a nested list
-
-                top_latent = inputs_latents[-1]
-                y_hat = self.readout_activation(self.readout(top_latent))
-                supervised_error = (y_batch-y_hat).abs().mean().item()
-                supervised_errors.append(supervised_error)
-
-        return inputs_latents, all_errors, all_gm_errors, all_activations, supervised_errors
-
-    def inference(self, T_infer, x_batch, last_activations, eta_infer): 
-        with torch.no_grad(): 
-            inputs_latents = [x_batch] + copy.deepcopy(last_activations)
+            inputs_latents = [x_batch] + self.init_latents(x_batch.shape[0])
             all_errors, all_gm_errors, all_activations = [], [], []
 
             for t in range(1, T_infer + 1): 
@@ -137,9 +120,9 @@ class PredictiveCodingNetwork(nn.Module):
 
         return inputs_latents, all_errors, all_gm_errors, all_activations
     
-    def learn(self, x_batch, y_batch, inputs_latents, eta_learn): 
-        with torch.no_grad(): # handling weight updates manually; don't want pytorch automatic updates to interfere
-            all_errors, all_gm_errors = [], []
+    def learn(self, x_batch, y_batch, inputs_latents, eta_learn, eta_learn_readout): 
+        all_errors, all_gm_errors = [], []
+        with torch.no_grad(): 
             for l in range(self.L): 
                 errors, gm_errors, activations = self.compute_errors(inputs_latents)
                 # below code from code sample provided in pcn paper (https://arxiv.org/html/2506.06332v1)
@@ -147,29 +130,34 @@ class PredictiveCodingNetwork(nn.Module):
                 grad_wl = -(gm_errors[l].T @ inputs_latents[l+1]) / len(x_batch)  # -gm_errors represents the hadamard product of the error at each layer with the derivative of the activation function applied to the activation
                 self.layers[l].W -= eta_learn * grad_wl
 
-            # updating readout based on y_batch (this is the only time that actual y should be used)
-            top_latent_state = inputs_latents[self.L]
-            logits = self.readout(top_latent_state)
-            y_hat = self.readout_activation(logits)
-            
-            eps_L = y_batch - y_hat
-            batch_size = y_batch.shape[0]
+        # updating readout based on y_batch (this is the only time that actual y should be used)
+        top_latent_state = inputs_latents[self.L]
 
-            adjusted_error = eps_L * self.readout_activation_deriv(y_hat)
+        class_0 = top_latent_state[y_batch.squeeze() == 0]
+        class_1 = top_latent_state[y_batch.squeeze() == 1]
 
-            grad_w_readout = adjusted_error.T @ top_latent_state / batch_size # formula from https://github.com/Monadillo/pcn-intro/blob/main/pcn_cifar10_notebook.ipynb
-            grad_b_readout = adjusted_error.mean(dim=0) # bc I'm including a bias term, shifting it up by the mean of the adjusted error to center it there
-            self.readout.weight += eta_learn * grad_w_readout
-            self.readout.bias += eta_learn * grad_b_readout
-            
-            all_errors.append(eps_L)
-            all_gm_errors.append(adjusted_error)
+        logits = self.readout(top_latent_state)
+        targets = y_batch.float()
+        loss = self.readout_loss(logits, targets)
+        self.readout_optimizer.zero_grad()
+        loss.backward()
+        self.readout_optimizer.step()
 
-        return inputs_latents, all_errors, all_gm_errors # I'm not sure if/how these will be useful, but I do want something I can use to measure the accuracy of training
+        y_hat = self.readout_activation(self.readout(top_latent_state))
+
+        # print("Prediction mean:", y_hat.mean().item())
+        # print("Prediction std:", y_hat.std().item())
+        # print("Prediction min:", y_hat.min().item())
+        # print("Prediction max:", y_hat.max().item())
+        # print("Target mean:", y_batch.float().mean().item())
+        
+        all_errors.append(loss)
+
+        return inputs_latents, all_errors, [] # I'm not sure if/how these will be useful, but I do want something I can use to measure the accuracy of training
 
 # TODO: make defense for why I chose two PCN layers
 class PredictiveCodingRNN(nn.Module): 
-    def __init__(self, n_time_steps, nn_dims, nn_output_dim, activation_fn=torch.relu, activation_deriv=lambda a: (a > 0).float()): # nn_dims will be 2 for me, plus 1 output layer
+    def __init__(self, n_time_steps, nn_dims, nn_output_dim, activation_fn=torch.tanh, activation_deriv=lambda a: 1 - torch.tanh(a).pow(2)): # nn_dims will be 2 for me, plus 1 output layer
         super().__init__()
         # n_time_steps = the number of PCNs needed
         self.nn_dims = nn_dims
@@ -189,7 +177,7 @@ class PredictiveCodingRNN(nn.Module):
             for error in iteration
         ])
     
-    def forward_train(self, x_batch, y_batch, T_infer, eta_infer, eta_learn): # eta_infer is learning rate
+    def forward_train(self, x_batch, y_batch, T_infer, eta_infer, eta_learn, eta_learn_readout): # eta_infer is learning rate
         '''
         Goes through each PCN in the RNN and trains it to predict its elements of y_batch given its elements of x_batch
         '''
@@ -197,22 +185,25 @@ class PredictiveCodingRNN(nn.Module):
         # go through each PCN and train it separately, with the others frozen
         # TODO: think about batching/what I'm doing on a technical level
         batch_size = x_batch[0].shape[0]
-        last_activations = self.pcn.init_latents(batch_size)  # TODO: figure out what to do for the first step where there are no past activations
+        last_activations = self.pcn.init_latents(batch_size)
         errors_latents, gm_errors_latents, errors_learn, gm_errors_learn = [], [], [], []
-        supervised_errors = []
-        for i in range(self.n_time_steps): 
+
+        for i in range(len(x_batch)): 
             this_pcn_x = x_batch[i] # NOTE: x_batch needs to have the format: d1 is step, d2 is sequence of timesteps, d3 is player decision + computer decision
             this_pcn_y = y_batch[i] # same note applies here
-            inputs_latents, all_errors_latents, all_gm_errors_latents, activations = self.pcn.inference(T_infer, this_pcn_x, last_activations, eta_infer)
-            inputs_latents, all_errors_learn, all_gm_errors_learn = self.pcn.learn(this_pcn_x, this_pcn_y, inputs_latents, eta_learn)
+            this_pcn_x = torch.cat([x_batch[i], torch.zeros(x_batch[i].shape[0], 13, device=x_batch[i].device, dtype=x_batch[i].dtype)], dim=1)# torch.cat([this_pcn_x] + last_activations, dim=1)
+            inputs_latents, all_errors_latents, all_gm_errors_latents, activations = self.pcn.inference(T_infer, this_pcn_x, eta_infer)
+            inputs_latents, all_errors_learn, all_gm_errors_learn = self.pcn.learn(this_pcn_x, this_pcn_y, inputs_latents, eta_learn, eta_learn_readout)
             last_activations = inputs_latents[1:]
 
             # storing average errors for each pcn
             errors_latents.append(self.average_error(all_errors_latents))
             gm_errors_latents.append(self.average_error(all_gm_errors_latents))
-            errors_learn.append(self.average_error(all_errors_learn))
-            gm_errors_learn.append(self.average_error(all_gm_errors_learn))
-
+            errors_learn.append(all_errors_learn[0].item())
+            if all_gm_errors_learn:
+                gm_errors_learn.append(self.average_error(all_gm_errors_learn))
+            else:
+                gm_errors_learn.append(0.0)
 
         avg_errors_latents = np.mean(errors_latents)
         avg_gme_latents = np.mean(gm_errors_latents)
@@ -226,9 +217,10 @@ class PredictiveCodingRNN(nn.Module):
         all_y_preds = []
         batch_size = x_batch[0].shape[0] # requires a very specific formatting of x_batch
         last_activations = self.pcn.init_latents(batch_size)
-        for i in range(self.n_time_steps): 
+        for i in range(len(x_batch)): # using sequence length 
             this_pcn_x = x_batch[i] # needs to have the same format as x_batch in forward_train
-            inputs_latents, all_errors_latents, all_gm_errors_latents, activations = self.pcn.inference(T_infer, this_pcn_x, last_activations, eta_infer)
+            this_pcn_x = torch.cat([x_batch[i], torch.zeros(x_batch[i].shape[0], 13, device=x_batch[i].device, dtype=x_batch[i].dtype)], dim=1)# torch.cat([this_pcn_x] + last_activations, dim=1)
+            inputs_latents, all_errors_latents, all_gm_errors_latents, activations = self.pcn.inference(T_infer, this_pcn_x, eta_infer)
             last_activations = inputs_latents[1:]
             last_latent = inputs_latents[len(inputs_latents)-1]
             y_pred = self.pcn.readout(last_latent)

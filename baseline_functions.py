@@ -16,6 +16,27 @@ def get_majority_baseline(train_targets, val_targets):
 
     return float(mse.item())
 
+# function written by ChatGPT to calculate baseline accuracy rather than just loss
+def get_majority_baseline_accuracy(train_targets, val_targets): 
+    train_targets = torch.as_tensor(
+        train_targets, dtype=torch.float32
+    ).flatten()
+
+    val_targets = torch.as_tensor(
+        val_targets, dtype=torch.float32
+    ).flatten()
+
+    # Find the most common training label
+    majority_class = torch.mode(train_targets).values
+
+    # Predict that label for every validation example
+    predictions = torch.full_like(val_targets, majority_class.item())
+
+    # Calculate accuracy
+    accuracy = (predictions == val_targets).float().mean()
+
+    return float(accuracy.item())
+
 # also written by ChatGPT - basically, if you use the average of the training targets to predict validation labels, this is what you would get
 def get_avg_baseline(train_targets, val_targets):
     train_targets = torch.as_tensor(train_targets, dtype=torch.float32)-1

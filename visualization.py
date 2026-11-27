@@ -78,40 +78,41 @@ def make_chart(out, accuracy, report_every):
 
 def display_pcrnn_results(n_epochs, inference_errors, inference_gm_errors, learning_errors, learning_gm_errors, val_errors, val_accuracies):
     num_runs = len(inference_errors) 
-    fig, axes = plt.subplots(num_runs * 3, 2, figsize=(12,8*num_runs), squeeze=False)
+    fig, axes = plt.subplots(num_runs * 3, 2, figsize=(12,8/num_runs), squeeze=False)
+    epochs = range(1, n_epochs+1)
 
     for i in range(num_runs): 
-        axes[i*3, 0].plot(n_epochs, inference_errors[i], marker='o')
+        axes[i*3, 0].plot(epochs, inference_errors[i], marker='o', color='purple')
         axes[i*3, 0].set_title(f"Run {i+1} Error History (Infer)")
         axes[i*3, 0].set_xlabel("Epoch")
         axes[i*3, 0].set_ylabel("Error")
         axes[i*3, 0].grid(True)
 
-        axes[i*3, 1].plot(n_epochs, inference_gm_errors[i], marker='o')
+        axes[i*3, 1].plot(epochs, inference_gm_errors[i], marker='o', color='purple')
         axes[i*3, 1].set_title(f"Run {i+1} Gain Mod Error History (Infer)")
         axes[i*3, 1].set_xlabel("Epoch")
         axes[i*3, 1].set_ylabel("Error")
         axes[i*3, 1].grid(True)
 
-        axes[i*3 + 1, 0].plot(n_epochs, learning_errors[i], marker='o')
-        axes[i*3 + 1, 0].set_title(f"Run {i+1} Error History (Learning)")
+        axes[i*3 + 1, 0].plot(epochs, learning_errors[i], marker='o', color='green')
+        axes[i*3 + 1, 0].set_title(f"Run {i+1} Supervised Readout Error History (Learning)")
         axes[i*3 + 1, 0].set_xlabel("Epoch")
         axes[i*3 + 1, 0].set_ylabel("Error")
         axes[i*3 + 1, 0].grid(True)
 
-        axes[i*3 + 1, 1].plot(n_epochs, learning_gm_errors[i], marker='o')
-        axes[i*3 + 1, 1].set_title(f"Run {i+1} Gain Mod Error History (Learning)")
+        axes[i*3 + 1, 1].plot(epochs, learning_gm_errors[i], marker='o', color='green')
+        axes[i*3 + 1, 1].set_title(f"Run {i+1} Supervised Readout Gain Mod Error History (Learning)")
         axes[i*3 + 1, 1].set_xlabel("Epoch")
         axes[i*3 + 1, 1].set_ylabel("Error")
         axes[i*3 + 1, 1].grid(True)
 
-        axes[i*3 + 2, 0].plot(n_epochs, val_errors[i], marker='o')
+        axes[i*3 + 2, 0].plot(epochs, val_errors[i], marker='o', color='orange')
         axes[i*3 + 2, 0].set_title(f"Run {i+1} Validation Errors")
         axes[i*3 + 2, 0].set_xlabel("Epoch")
         axes[i*3 + 2, 0].set_ylabel("Error")
         axes[i*3 + 2, 0].grid(True)
 
-        axes[i*3 + 2, 1].plot(n_epochs, val_accuracies[i], marker='o')
+        axes[i*3 + 2, 1].plot(epochs, val_accuracies[i], marker='o', color='orange')
         axes[i*3 + 2, 1].set_title(f"Run {i+1} Validation Accuracy")
         axes[i*3 + 2, 1].set_xlabel("Epoch")
         axes[i*3 + 2, 1].set_ylabel("Accuracy")
