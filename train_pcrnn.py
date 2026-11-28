@@ -9,6 +9,7 @@ from visualization import display_pcrnn_results
 from baseline_functions import get_majority_baseline_accuracy
 
 batch_size = 5 # needed for splitting data
+pcrnn_dims = [8+5+10, 8, 5, 1] # used for computer and player pcrnn
 # TODO: confirm that dimensions are all correct
 
 # creating x and y batches w/ size batch_size
@@ -167,17 +168,12 @@ def train(pcrnn, n_epochs, x_batches, y_batches, x_val, y_val, eta_infer, eta_le
     all_val_errors, all_accuracies = [], []
 
     for epoch in range(n_epochs): 
-        # print(f"Epoch {epoch+1} / {n_epochs}")
         ep_e_infer, ep_gme_infer, ep_e_learn, ep_gme_learn = [], [], [], []
 
         # training
         for x_batch, y_batch in zip(x_batches, y_batches): 
             # print(f"{x_batch=}, {y_batch=}")
-            readout_before = pcrnn.pcn.readout.weight.detach().clone()
-            bias_before = pcrnn.pcn.readout.bias.detach().clone()
             e_latents, gme_latents, e_learn, gme_learn = pcrnn.forward_train(x_batch, y_batch, T_infer, eta_infer, eta_learn, eta_learn_readout)
-            readout_after = pcrnn.pcn.readout.weight.detach().clone()
-            bias_after = pcrnn.pcn.readout.bias.detach().clone()
             # print("Readout weight change:",
             #     torch.norm(readout_after - readout_before).item())
             # print(f"Bias change: {torch.norm(bias_after-bias_before).item()}")
@@ -238,9 +234,6 @@ def train_pcrnn(pcrnn, n_epochs, T_infer, eta_infer, eta_learn, batch_size, with
     # - 1st dimension (tuple) is cd versus pd
     # - 2nd dimension (list of tensors) are scenarios (these comprise batches)
     # - 3rd dimension (tensors) are sequences of decisions
-
-    # TODO: I couldn't find one of the printed decision series in the data. I need to figure out what caused that/what's going on
-    # NOTE: the paper doesn't clarify who made the first move. I'm assuming the player, but I know this could be wrong since I'm making an assumption
 
     # x_batch (and therefore also all_trains) needs to have the format: d1 is step, d2 is sequence of timesteps, d3 is player decision + computer decision
 
@@ -365,7 +358,7 @@ if p_c_b in ['p', 'b']:
 
     for i in range(num_times_p): 
         print(f"\nStarting Player Model Training {i+1}/{num_times_p}")
-        player_pcrnn = PredictiveCodingRNN(29, [10 + 8+5, 8, 5], 1) # 17 bc 2 decisions and then 15 latents
+        player_pcrnn = PredictiveCodingRNN(29, pcrnn_dims, 1) # 17 bc 2 decisions and then 15 latents
         p_out, p_mean_baseline, p_baseline_acc, p_t_b_l, p_t_b_a, p_tests = train_pcrnn(player_pcrnn, p_n_epochs, p_T_infer, p_eta_infer, p_eta_learn, batch_size, eta_learn_readout=p_eta_learn_readout, with_print=True, report_every=report_every)
         p_outs.append(p_out)
         p_mean_baselines.append(p_mean_baseline)
@@ -472,7 +465,7 @@ if p_c_b in ['c', 'b']:
 
     for i in range(num_times_c): 
         print(f"\nStarting Computer Model Training {i+1}/{num_times_c}")
-        computer_pcrnn = PredictiveCodingRNN(29, [10 + 8+5, 8, 5], 1)
+        computer_pcrnn = PredictiveCodingRNN(29, pcrnn_dims, 1)
         c_out, c_mean_baseline, c_baseline_acc, c_t_b_l, c_t_b_a, c_tests = train_pcrnn(computer_pcrnn, c_n_epochs, c_T_infer, c_eta_infer, c_eta_learn, batch_size, eta_learn_readout=c_eta_learn_readout, with_print=True, report_every=report_every)
         c_outs.append(c_out)
         c_mean_baselines.append(c_mean_baseline)

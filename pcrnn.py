@@ -19,8 +19,8 @@ class PCNLayer(nn.Module):
         self.activation_fn = activation_fn
         self.activation_deriv = activation_deriv
 
-    def forward(self, x_above): 
-        a = x_above @ self.W.T # matrix multiplication
+    def forward(self, x_below): 
+        a = x_below @ self.W.T # matrix multiplication
         x_hat = self.activation_fn(a)
         # print(f"{type(x_hat)=}")
         return x_hat, a
@@ -33,15 +33,14 @@ class PredictiveCodingNetwork(nn.Module):
         self.dims = dims # number of layers it will have
         self.L = len(dims)-1
         # inputs_latents[1] = first layer, inputs_latents[2] = second layer, etc. 
-        self.layers = nn.ModuleList([
-            PCNLayer(in_dim=dims[l+1], out_dim=dims[l], activation_fn=activation_fn, activation_deriv=activation_deriv)
+        self.layers = nn.ModuleList([ # predicts from the bottom (the input) to the top - this is just because its simpler to do for how I had my network configured before, there's no actual significance abt what's the "bottom" and what's the "top"
+            PCNLayer(in_dim=dims[l], out_dim=dims[l+1], activation_fn=activation_fn, activation_deriv=activation_deriv)
             for l in range(self.L)
         ])
         self.readout = nn.Linear(dims[-1], output_dim)
         self.readout_optimizer = torch.optim.Adam(self.readout.parameters(), lr=0.001) # TODO: make this learning rate not a magic number/an input
         self.readout_loss = nn.BCEWithLogitsLoss()
         self.readout_activation = nn.Sigmoid()
-        self.readout_activation_deriv = lambda a: a * (1-a)
 
     def init_latents(self, batch_size): 
         return [
@@ -58,20 +57,22 @@ class PredictiveCodingNetwork(nn.Module):
     def compute_errors(self, inputs_latents): 
         errors, gain_modulated_errors = [], [] # gain modulated errors are errors scaled by activations, so there's a nonlinearity in the error I think? 
         all_activations = []
+
         for l, layer in enumerate(self.layers): 
             # print(f"{inputs_latents=}")
             # print(f"{l=}")
-            x_hat, a = self.predict_latents(layer, inputs_latents[l+1])
+            x_hat, a = self.predict_latents(layer, inputs_latents[l])
             # print(f"{len(a)=}")
             all_activations.append(a)
             # print(f"{type(inputs_latents[l])}")
             # print(f"{inputs_latents[l]=}")
-            actual_latents = inputs_latents[l]
+            actual_latent = inputs_latents[l+1]
             # TODO: figure out dimensioning things here too
-            err = actual_latents - x_hat # actual latent minus predicted latent (eps latent)
+            err = actual_latent - x_hat # actual latent minus predicted latent (eps latent)
             gm_err = err*layer.activation_deriv(a)
             errors.append(err)
             gain_modulated_errors.append(gm_err)
+        
         return errors, gain_modulated_errors, all_activations
     
     def calculate_latent_grad(self, error_latent, gain_mod_error_last_latent, weights_last_latent): 
@@ -79,41 +80,38 @@ class PredictiveCodingNetwork(nn.Module):
         grad_xl = error_latent - gain_mod_error_last_latent @ weights_last_latent
         return grad_xl
     
-    # math notes: 
-    # T means to transpose a matrix (swap rows and cols)
-    # circle w/ a dot inside is the Hadamard product (element-wise multiplication)
-    # together: multiply the error for each layer by its corresponding activation, passed through the derivative of the activation
-    # derivative tells you how sensitive a neuron's output is to changes in its input - things that have large derivatives will therefore be adapted more, smaller derivatives adapted less
-    # same with error - things with larger error will be adapted more, smaller error less
-    # this is basic backpropagation
-    '''
-    def calculate_weight_grad(self, error_latent, activation_latent, ) # T means transpose a matrix; gradient for the weights is 
-        grad_wl = -(error_latent)
-    '''
-
-    def infer(self, inputs_latents, eta_infer): # x-input = x-batch
+    def infer(self, inputs_latents, eta_infer, y_batch=None): # x-input = x-batch; no y_batch used during testing, but used during training to inform latent updates
         working_inputs_latents = copy.deepcopy(inputs_latents) # bc I'm worried that I'll accidentally update the original latent_states list otherwise; used https://stackoverflow.com/questions/17873384/how-to-deep-copy-a-list
-        errors, gain_modulated_errors, all_activations = self.compute_errors(inputs_latents)
+        errors, gain_modulated_errors, all_activations = self.compute_errors(working_inputs_latents)
 
         # update latents based on errors
         for l in range(1, self.L + 1): 
-            if l == self.L: # top layer
-                error_above = torch.zeros_like(inputs_latents[l]) # needs to be the right dimensions
-            else: 
-                error_above = errors[l] # if its a middle layer (bottom layer is also a middle layer bc input is below it), then it looks at the actual error above
-            grad_xl = self.calculate_latent_grad(error_above, gain_modulated_errors[l-1], self.layers[l-1].W)
+            error_below = errors[l-1] # only thing that doesn't have an error below it is the input, and this starts at layer 1 not layer 0
+            if l == self.L: # top layer; no layer above it
+                grad_xl = error_below # just use error below it
+                
+                # supervised for training only
+                if y_batch is not None: # if y_batch: crashed
+                    raw_logits = self.readout(working_inputs_latents[self.L])
+                    targets = y_batch.float()
+                    sup_grad = ((torch.sigmoid(raw_logits)-targets) @ self.readout.weight) / raw_logits.shape[0]
+                    grad_xl += sup_grad
+
+            else: # use both error above and error below it
+                grad_xl = self.calculate_latent_grad(error_below, gain_modulated_errors[l], self.layers[l].W)
             # TODO: fix how I'm handling input latents' size, bc its dimensions are all weird bc of batching
             working_inputs_latents[l] -=  eta_infer * grad_xl
-
+        
+        errors, gain_modulated_errors, all_activations = self.compute_errors(working_inputs_latents) # calculated with updated values
         return working_inputs_latents, errors, gain_modulated_errors, all_activations
     
-    def inference(self, T_infer, x_batch, eta_infer): 
+    def inference(self, T_infer, x_batch, eta_infer, y_batch=None): 
         with torch.no_grad(): 
             inputs_latents = [x_batch] + self.init_latents(x_batch.shape[0])
             all_errors, all_gm_errors, all_activations = [], [], []
 
             for t in range(1, T_infer + 1): 
-                inputs_latents, errors, gain_modulated_errors, activations = self.infer(inputs_latents, eta_infer)
+                inputs_latents, errors, gain_modulated_errors, activations = self.infer(inputs_latents, eta_infer, y_batch=y_batch)
                 all_errors.append(errors)
                 all_gm_errors.append(gain_modulated_errors)
                 all_activations.append(activations) # creates a nested list
@@ -127,7 +125,7 @@ class PredictiveCodingNetwork(nn.Module):
                 errors, gm_errors, activations = self.compute_errors(inputs_latents)
                 # below code from code sample provided in pcn paper (https://arxiv.org/html/2506.06332v1)
                 # TODO: figure out why they're dividing by batch length
-                grad_wl = -(gm_errors[l].T @ inputs_latents[l+1]) / len(x_batch)  # -gm_errors represents the hadamard product of the error at each layer with the derivative of the activation function applied to the activation
+                grad_wl = -(gm_errors[l].T @ inputs_latents[l]) / len(x_batch)  # -gm_errors represents the hadamard product of the error at each layer with the derivative of the activation function applied to the activation
                 self.layers[l].W -= eta_learn * grad_wl
 
         # updating readout based on y_batch (this is the only time that actual y should be used)
@@ -192,7 +190,7 @@ class PredictiveCodingRNN(nn.Module):
             this_pcn_x = x_batch[i] # NOTE: x_batch needs to have the format: d1 is step, d2 is sequence of timesteps, d3 is player decision + computer decision
             this_pcn_y = y_batch[i] # same note applies here
             this_pcn_x = torch.cat([x_batch[i], torch.zeros(x_batch[i].shape[0], 13, device=x_batch[i].device, dtype=x_batch[i].dtype)], dim=1)# torch.cat([this_pcn_x] + last_activations, dim=1)
-            inputs_latents, all_errors_latents, all_gm_errors_latents, activations = self.pcn.inference(T_infer, this_pcn_x, eta_infer)
+            inputs_latents, all_errors_latents, all_gm_errors_latents, activations = self.pcn.inference(T_infer, this_pcn_x, eta_infer, y_batch=this_pcn_y)
             inputs_latents, all_errors_learn, all_gm_errors_learn = self.pcn.learn(this_pcn_x, this_pcn_y, inputs_latents, eta_learn, eta_learn_readout)
             last_activations = inputs_latents[1:]
 
